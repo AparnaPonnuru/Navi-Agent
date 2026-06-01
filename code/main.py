@@ -100,9 +100,9 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
         ]
       }},
       "micro_steps": [
-        {{"week": "Week 1-2", "task": "<specific action>", "resource": "<real resource>"}},
-        {{"week": "Week 3-4", "task": "<specific action>", "resource": "<real resource>"}},
-        {{"week": "Week 5-6", "task": "<specific action>", "resource": "<real resource>"}}
+        {{"task": "<specific action>", "resource": "<real resource>"}},
+        {{"task": "<specific action>", "resource": "<real resource>"}},
+        {{"task": "<specific action>", "resource": "<real resource>"}}
       ]
     }}
   ],
@@ -130,34 +130,47 @@ async def generate_path(req: GoalRequest):
 
     prompt = PROMPT_TEMPLATE.format(goal=req.goal.strip())
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=8192,
-        temperature=0.55,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a career path engine. Always respond with valid JSON only. No markdown, no backticks, no explanation.",
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-    )
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=8192,
+            temperature=0.55,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a career path engine. Always respond with valid JSON only. No markdown, no backticks, no explanation. Start your response with { and end with }",
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Groq API error: {str(e)}")
 
-    raw = response.choices[0].message.content
-    raw = re.sub(r"```(?:json)?", "", raw).strip().strip("`")
+    raw = response.choices[0].message.content.strip()
+
+    # Strip markdown fences if any
+    raw = re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()
+
+    # Extract JSON object — grab everything between first { and last }
+    match = re.search(r'\{.*\}', raw, re.DOTALL)
+    if match:
+        raw = match.group(0)
+    else:
+        raise HTTPException(status_code=500, detail=f"No JSON found in response. Raw: {raw[:300]}")
 
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Model returned invalid JSON: {e}",
-)
+            detail=f"Invalid JSON: {e} | Raw start: {raw[:300]}",
+        )
 
-# ── Serve React frontend ──────────────────────────────────
+
+# Serve React frontend if built
 from fastapi.staticfiles import StaticFiles
 
 dist_path = os.path.join(os.path.dirname(__file__), "frontend", "dist")

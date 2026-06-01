@@ -306,7 +306,7 @@ function AuthStyles() {
       }
       .auth-logo {
         width: 36px; height: 36px; border-radius: 10px;
-        background: linear-gradient(135deg, var(--accent), var(--accent2));
+       background: linear-gradient(135deg, var(--green), var(--blue));
         color: #fff; font-weight: 700; font-size: 17px;
         display: flex; align-items: center; justify-content: center;
         font-family: var(--font-display);
@@ -423,8 +423,7 @@ function AuthStyles() {
 
       /* Right visual panel */
       .auth-visual {
-        background:
-          linear-gradient(135deg, rgba(43,174,142,0.12) 0%, rgba(90,155,232,0.08) 100%),
+        background: linear-gradient(135deg, rgba(52,168,83,0.1) 0%, rgba(66,133,244,0.08) 50%, rgba(232,49,42,0.06) 100%), #F8F9FA;
           linear-gradient(90deg, rgba(214,242,236,0.6) 0 1px, transparent 1px 48px),
           linear-gradient(0deg, rgba(214,242,236,0.6) 0 1px, transparent 1px 48px),
           #F0F7F4;

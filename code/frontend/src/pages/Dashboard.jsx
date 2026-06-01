@@ -14,7 +14,7 @@ import {
   IconTarget,
 } from "./Icons";
 
-const API = import.meta.env.VITE_API_URL || "";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const EXAMPLES = [
   { current: "High school student, science stream", goal: "Become a Data Scientist" },
@@ -234,119 +234,84 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
         </aside>
 
         <section className="generator-panel">
-          {loading ? (
-            <div className="skeleton-container">
-              <div className="skeleton-header">
-                <div className="skeleton-badge shimmer-bg" />
-                <div className="skeleton-title shimmer-bg" />
-                <div className="skeleton-sub shimmer-bg" />
-              </div>
+          <div className="dash-hero">
+  <div className="dash-hero-badge pill pill-teal">AI Path Engine</div>
+  <h1 className="display-title" style={{ marginTop: 7, fontSize: "28px", fontWeight: "500" }}>
+    Your route is built from<br />
+    one <em style={{ fontWeight: "500" }}>journey source</em>
+  </h1>
+  <p className="dash-sub">
+    Update the career journey card on the left, then generate a step-by-step path from that single route.
+  </p>
+</div>
 
-              <div className="card skeleton-card">
-                <div className="skeleton-canvas-sim">
-                  <div className="skeleton-pulse-ring start" />
-                  <div className="skeleton-pulse-ring end" />
-                  <div className="skeleton-road-dash" />
-                  <div className="skeleton-overlay-text">
-                    <div className="dot-pulse"><span/><span/><span/></div>
-                    <span>AI Path Engine is plotting your roadmap...</span>
-                  </div>
-                </div>
+          <div className="card route-visual-card">
+            <div className="route-visual-head">
+              <div>
+                <div className="section-label">Journey Summary</div>
+                <h5>Route preview</h5>
               </div>
+              <div className="journey-map-icon"><IconMap size={22} /></div>
+            </div>
 
-              <div className="skeleton-grid">
-                <div className="skeleton-tile shimmer-bg" />
-                <div className="skeleton-tile shimmer-bg" />
-                <div className="skeleton-tile shimmer-bg" />
+            <div className="map-canvas">
+              <div className="map-road map-road-main" />
+              <div className="map-road map-road-side" />
+              <div className="map-node map-node-start"><IconPin size={16} /></div>
+              <div className="map-node map-node-end"><IconTarget size={16} /></div>
+              <div className="map-label map-label-start">Current</div>
+              <div className="map-label map-label-end">Goal</div>
+            </div>
+
+            <div className="summary-grid">
+              <div>
+                <span>Starting point</span>
+                <strong>{formatPosition(profile)}</strong>
               </div>
-              
-              <div className="skeleton-info-row">
-                <div className="skeleton-info-card shimmer-bg" />
-                <div className="skeleton-info-card shimmer-bg" />
+              <div>
+                <span>Destination</span>
+                <strong>{goal.trim() || "Not set yet"}</strong>
+              </div>
+              <div>
+                <span>Signal quality</span>
+                <strong>{current.trim() && goal.trim() ? "Ready to generate" : "Needs route details"}</strong>
               </div>
             </div>
-          ) : (
-            <>
-              <div className="dash-hero">
-                <div className="dash-hero-badge pill pill-teal">AI Path Engine</div>
-                <h1 className="display-title" style={{ marginTop: 7, fontSize: "28px", fontWeight: "500" }}>
-                  Your route is built from<br />
-                  one <em style={{ fontWeight: "500" }}>journey source</em>
-                </h1>
-                <p className="dash-sub">
-                  Update the career journey card on the left, then generate a step-by-step path from that single route.
-                </p>
-              </div>
+          </div>
 
-              <div className="card route-visual-card">
-                <div className="route-visual-head">
-                  <div>
-                    <div className="section-label">Journey Summary</div>
-                    <h5>Route preview</h5>
-                  </div>
-                  <div className="journey-map-icon"><IconMap size={22} /></div>
-                </div>
+          <div style={{ marginTop: 28 }}>
+            <div className="section-label">Quick destinations</div>
+            <div className="dash-chips">
+              {EXAMPLES.map((ex, i) => (
+                <button
+                  key={i}
+                  className="dash-chip"
+                  onClick={() => fillExample(ex)}
+                  disabled={loading}
+                >
+                  {ex.goal}
+                </button>
+              ))}
+            </div>
+          </div>
 
-                <div className="map-canvas">
-                  <div className="map-road map-road-main" />
-                  <div className="map-road map-road-side" />
-                  <div className="map-node map-node-start"><IconPin size={16} /></div>
-                  <div className="map-node map-node-end"><IconTarget size={16} /></div>
-                  <div className="map-label map-label-start">Current</div>
-                  <div className="map-label map-label-end">{goal.trim() ? goal.trim() : "Goal"}</div>
+          <div style={{ marginTop: 40 }}>
+            <div className="section-label">Route Intelligence</div>
+            <div className="dash-steps-row">
+              {[
+                { Icon: IconPin, label: "Profile-aware start", desc: "Uses your saved grade, curriculum, stream and location context" },
+                { Icon: IconMap, label: "Single route source", desc: "The left journey card drives the generated path" },
+                { Icon: IconSearch, label: "Step clarity", desc: "Results focus on macro and micro understanding for each step" },
+                { Icon: IconShoppingCart, label: "Resource layer", desc: "Marketplace connects each step to mentors and learning options" },
+              ].map((s, i) => (
+                <div className="dash-how-card" key={i}>
+                  <div className="dash-how-icon"><s.Icon size={28} /></div>
+                  <div className="dash-how-label">{s.label}</div>
+                  <div className="dash-how-desc">{s.desc}</div>
                 </div>
-
-                <div className="summary-grid">
-                  <div>
-                    <span>Starting point</span>
-                    <strong>{formatPosition(profile)}</strong>
-                  </div>
-                  <div>
-                    <span>Destination</span>
-                    <strong>{goal.trim() || "Not set yet"}</strong>
-                  </div>
-                  <div>
-                    <span>Signal quality</span>
-                    <strong>{current.trim() && goal.trim() ? "Ready to generate" : "Needs route details"}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 28 }}>
-                <div className="section-label">Quick destinations</div>
-                <div className="dash-chips">
-                  {EXAMPLES.map((ex, i) => (
-                    <button
-                      key={i}
-                      className="dash-chip"
-                      onClick={() => fillExample(ex)}
-                      disabled={loading}
-                    >
-                      {ex.goal}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ marginTop: 40 }}>
-                <div className="section-label">Route Intelligence</div>
-                <div className="dash-steps-row">
-                  {[
-                    { Icon: IconPin, label: "Profile-aware start", desc: "Uses your saved grade, curriculum, stream and location context" },
-                    { Icon: IconMap, label: "Single route source", desc: "The left journey card drives the generated path" },
-                    { Icon: IconSearch, label: "Step clarity", desc: "Results focus on macro and micro understanding for each step" },
-                    { Icon: IconShoppingCart, label: "Resource layer", desc: "Marketplace connects each step to mentors and learning options" },
-                  ].map((s, i) => (
-                    <div className="dash-how-card" key={i}>
-                      <div className="dash-how-icon"><s.Icon size={28} /></div>
-                      <div className="dash-how-label">{s.label}</div>
-                      <div className="dash-how-desc">{s.desc}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+              ))}
+            </div>
+          </div>
         </section>
       </div>
 
@@ -364,22 +329,15 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           gap: 18px;
           position: sticky;
           top: 92px;
-          max-height: calc(100vh - 120px);
-          overflow-y: auto;
-          scrollbar-width: none; /* Hide default scrollbar for Firefox */
-        }
-        .journey-panel::-webkit-scrollbar {
-          display: none; /* Hide default scrollbar for Chrome/Safari/Webkit */
         }
         .journey-card, .profile-card {
           padding: 22px;
           border-color: rgba(43, 174, 142, 0.22);
         }
         .journey-card {
-          background:
-            linear-gradient(180deg, rgba(214, 242, 236, 0.65), rgba(255, 255, 255, 0.96)),
+          background: linear-gradient(180deg, rgba(232,240,254,0.5), rgba(255,255,255,0.98));
             var(--bg2);
-        }
+        }                            
         .journey-card-head, .profile-card-head, .route-visual-head {
           display: flex;
           align-items: flex-start;
@@ -471,29 +429,6 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           color: var(--text2);
           line-height: 1.35;
         }
-        .coord-status-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          width: 100%;
-        }
-        .inline-detect-btn {
-          background: var(--accent-soft);
-          border: 1px solid rgba(43, 174, 142, 0.25);
-          color: var(--accent2);
-          font-family: var(--font-body);
-          font-size: 11px;
-          font-weight: 700;
-          padding: 4px 8px;
-          border-radius: 6px;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        .inline-detect-btn:hover {
-          background: var(--accent);
-          color: #fff;
-          border-color: var(--accent);
-        }
         .route-track {
           width: 34px;
           min-height: 42px;
@@ -509,9 +444,68 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           border-radius: 50%;
           background: var(--border);
         }
-        .journey-error {
+        .coordinate-tools {
+          margin-top: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .detect-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          border: 1px solid rgba(43, 174, 142, 0.35);
+          background: #fff;
+          color: var(--accent2);
+          border-radius: 10px;
+          padding: 10px 12px;
+          font-family: var(--font-body);
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .detect-btn:disabled {
+          opacity: 0.7;
+          cursor: wait;
+        }
+        .coord-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 10px;
+        }
+        .coord-field {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          font-size: 11px;
+          color: var(--text3);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          font-weight: 600;
+        }
+        .coord-field input {
+          border: 1px solid var(--border);
+          background: #fff;
+          border-radius: 9px;
+          padding: 9px 11px;
+          font-size: 13px;
+          color: var(--text);
+          font-family: var(--font-body);
+          outline: none;
+        }
+        .coord-field input:focus {
+          border-color: var(--accent);
+          box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .coord-error, .journey-error {
           font-size: 12px;
           line-height: 1.5;
+        }
+        .coord-error {
+          color: #C05A3A;
+        }
+        .journey-error {
           margin-top: 14px;
         }
         .journey-loading {
@@ -534,14 +528,14 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
         }
         .profile-detail-grid {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 8px;
+          grid-template-columns: 1fr;
+          gap: 10px;
         }
         .profile-detail {
           display: flex;
-          gap: 8px;
-          align-items: center;
-          padding: 8px 10px;
+          gap: 10px;
+          align-items: flex-start;
+          padding: 11px;
           border-radius: 10px;
           background: var(--bg3);
           border: 1px solid var(--border);
@@ -558,18 +552,17 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           flex-shrink: 0;
         }
         .profile-detail-label {
-          font-size: 10px;
+          font-size: 11px;
           color: var(--text3);
           text-transform: uppercase;
           letter-spacing: 0.05em;
           font-weight: 600;
-          margin-bottom: 1px;
+          margin-bottom: 2px;
         }
         .profile-detail-value {
-          font-size: 12px;
+          font-size: 13px;
           color: var(--text);
-          line-height: 1.3;
-          font-weight: 500;
+          line-height: 1.45;
         }
         .generator-panel {
           min-width: 0;
@@ -592,23 +585,6 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           color: var(--text);
           font-family: var(--font-display);
         }
-        
-        /* Map Canvas & Node Animations */
-        @keyframes pulseGlow {
-          0% { box-shadow: 0 0 0 0 rgba(43, 174, 142, 0.45); }
-          70% { box-shadow: 0 0 0 10px rgba(43, 174, 142, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(43, 174, 142, 0); }
-        }
-        @keyframes pulseGlowCoral {
-          0% { box-shadow: 0 0 0 0 rgba(234, 114, 83, 0.45); }
-          70% { box-shadow: 0 0 0 10px rgba(234, 114, 83, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(234, 114, 83, 0); }
-        }
-        @keyframes mapFlow {
-          0% { background-position: 0% 50%; }
-          100% { background-position: 200% 50%; }
-        }
-
         .map-canvas {
           position: relative;
           height: 260px;
@@ -631,9 +607,6 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           left: 12%;
           top: 52%;
           transform: rotate(-12deg);
-          background: linear-gradient(90deg, #D7E3DD 0%, #D7E3DD 35%, #5ABBE8 50%, #D7E3DD 65%, #D7E3DD 100%);
-          background-size: 200% auto;
-          animation: mapFlow 4s linear infinite;
         }
         .map-road-side {
           width: 46%;
@@ -652,24 +625,21 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           align-items: center;
           justify-content: center;
           color: #fff;
+          box-shadow: 0 12px 26px rgba(17, 24, 39, 0.18);
         }
         .map-node-start {
           left: 16%;
           top: 56%;
           background: var(--accent);
-          animation: pulseGlow 3s infinite;
-          box-shadow: 0 12px 26px rgba(43, 174, 142, 0.3);
         }
         .map-node-end {
           right: 17%;
           top: 34%;
           background: var(--coral);
-          animation: pulseGlowCoral 3s infinite 1.5s;
-          box-shadow: 0 12px 26px rgba(234, 114, 83, 0.3);
         }
         .map-label {
           position: absolute;
-          padding: 6px 12px;
+          padding: 6px 10px;
           border-radius: 999px;
           background: #fff;
           border: 1px solid var(--border);
@@ -677,10 +647,6 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           font-size: 12px;
           font-weight: 700;
           color: var(--text2);
-          max-width: 140px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
         }
         .map-label-start {
           left: 11%;
@@ -688,7 +654,7 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
         }
         .map-label-end {
           right: 13%;
-          top: 18%;
+          top: 20%;
         }
         .summary-grid {
           display: grid;
@@ -746,126 +712,6 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
         .dash-how-label { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
         .dash-how-desc { font-size: 13px; color: var(--text2); line-height: 1.6; }
 
-        /* Skeleton Screen & Shimmer Animation */
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .shimmer-bg {
-          background: linear-gradient(90deg, var(--bg3) 25%, var(--border) 50%, var(--bg3) 75%);
-          background-size: 200% 100%;
-          animation: shimmer 1.8s infinite linear;
-        }
-        .skeleton-container {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-          animation: fadeIn 0.4s ease-out;
-        }
-        .skeleton-header {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          margin-bottom: 4px;
-        }
-        .skeleton-badge {
-          width: 90px;
-          height: 18px;
-          border-radius: 9px;
-        }
-        .skeleton-title {
-          width: 65%;
-          height: 32px;
-          border-radius: 8px;
-        }
-        .skeleton-sub {
-          width: 45%;
-          height: 15px;
-          border-radius: 6px;
-        }
-        .skeleton-card {
-          height: 260px;
-          border-radius: 18px;
-          border: 1px solid var(--border);
-          position: relative;
-          overflow: hidden;
-          background: var(--bg3);
-        }
-        .skeleton-canvas-sim {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          top: 0;
-          left: 0;
-        }
-        .skeleton-pulse-ring {
-          position: absolute;
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          border: 2.5px solid var(--accent);
-          opacity: 0.7;
-        }
-        .skeleton-pulse-ring.start {
-          left: 20%;
-          top: 55%;
-          animation: pulseGlow 1.8s infinite;
-        }
-        .skeleton-pulse-ring.end {
-          right: 20%;
-          top: 35%;
-          animation: pulseGlowCoral 1.8s infinite 0.9s;
-          border-color: var(--coral);
-        }
-        .skeleton-road-dash {
-          position: absolute;
-          width: 58%;
-          height: 4px;
-          left: 21%;
-          top: 48%;
-          transform: rotate(-10deg);
-          border-top: 3px dashed var(--border);
-          opacity: 0.6;
-        }
-        .skeleton-overlay-text {
-          position: absolute;
-          width: 100%;
-          bottom: 24px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-        }
-        .skeleton-overlay-text span {
-          font-size: 13px;
-          color: var(--text2);
-          font-weight: 500;
-        }
-        .skeleton-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 12px;
-        }
-        .skeleton-tile {
-          height: 80px;
-          border-radius: 12px;
-          border: 1px solid var(--border);
-        }
-        .skeleton-info-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-        }
-        .skeleton-info-card {
-          height: 110px;
-          border-radius: var(--radius);
-          border: 1px solid var(--border);
-        }
-
         @media (max-width: 980px) {
           .dash-shell {
             grid-template-columns: 1fr;
@@ -876,7 +722,7 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
           .profile-detail-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
-          .summary-grid, .skeleton-grid {
+          .summary-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -893,12 +739,10 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
             font-size: 21px;
           }
           .profile-detail-grid,
-          .dash-steps-row,
-          .skeleton-grid,
-          .skeleton-info-row {
+          .dash-steps-row {
             grid-template-columns: 1fr;
           }
-          .map-canvas, .skeleton-card {
+          .map-canvas {
             height: 220px;
           }
         }
@@ -908,5 +752,3 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
 }
 
 
-
-//CHECKED THE CHANGED AND PUBLISHED THE CODE 

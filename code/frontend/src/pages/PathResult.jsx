@@ -1,11 +1,11 @@
 import { IconAlert, IconArrowLeft, IconArrowRight } from "./Icons";
-
+   
 const STEP_COLORS = [
-  { pill: "pill-teal",     border: "#2BAE8E", bg: "#D6F2EC", num: "#1D8A6F" },
-  { pill: "pill-coral",    border: "#F07A5A", bg: "#FDEAE3", num: "#C05A3A" },
-  { pill: "pill-lavender", border: "#A89BE8", bg: "#EAE8FC", num: "#7B6EC0" },
-  { pill: "pill-amber",    border: "#E8A838", bg: "#FDF3DC", num: "#B07A18" },
-  { pill: "pill-blue",     border: "#5A9BE8", bg: "#E3EEFB", num: "#2A6BC0" },
+  { pill: "pill-teal",     border: "#34A853", bg: "#E6F4EA", num: "#2A8C44" },
+  { pill: "pill-blue",     border: "#4285F4", bg: "#E8F0FE", num: "#1A5DC8" },
+  { pill: "pill-red",      border: "#E8312A", bg: "#FDECEA", num: "#B5261F" },
+  { pill: "pill-amber",    border: "#FBBC04", bg: "#FEF7E0", num: "#B06000" },
+  { pill: "pill-lavender", border: "#4285F4", bg: "#E8F0FE", num: "#1A5DC8" },
 ];
 
 export default function PathResult({ pathData, userInput, onStepClick, onBack }) {
@@ -75,8 +75,6 @@ export default function PathResult({ pathData, userInput, onStepClick, onBack })
               style={{ borderLeft: `4px solid ${c.border}` }}
               onClick={() => onStepClick(step)}
             >
-              <div className="step-card-watermark">{String(step.id).padStart(2, "0")}</div>
-              
               <div className="step-card-top">
                 <div className="step-num" style={{ background: c.bg, color: c.num }}>
                   {step.id}
@@ -85,14 +83,26 @@ export default function PathResult({ pathData, userInput, onStepClick, onBack })
               </div>
               <div className="step-title">{step.title}</div>
               <div className="step-desc">{step.description}</div>
-              <div className="step-cta">
-                <span>Tap to explore</span>
-                <span className="step-cta-arrow"><IconArrowRight size={14} /></span>
-              </div>
+              <div className="step-cta">Tap to explore <IconArrowRight size={14} /></div>
             </div>
           );
         })}
       </div>
+
+      {/* Blind spots */}
+      {pathData.blind_spots?.length > 0 && (
+        <div style={{ marginTop: 48 }}>
+          <div className="section-label">Blind spots — what most people miss</div>
+          <div className="blindspots-list">
+            {pathData.blind_spots.map((spot, i) => (
+              <div key={i} className="blindspot-card card">
+                <span className="blindspot-icon"><IconAlert size={18} /></span>
+                <span className="blindspot-text">{spot}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Try another */}
       <div style={{ textAlign: "center", marginTop: 48 }}>
@@ -128,112 +138,45 @@ export default function PathResult({ pathData, userInput, onStepClick, onBack })
         .duration-val   { font-size: 15px; font-weight: 600; color: var(--text); }
         .duration-label { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
-        @keyframes progressGlow {
-          0% { opacity: 0.85; filter: brightness(1); }
-          50% { opacity: 1; filter: brightness(1.15); }
-          100% { opacity: 0.85; filter: brightness(1); }
-        }
         .result-readiness {
           display: flex; align-items: center; gap: 14px; margin-top: 20px; flex-wrap: wrap;
         }
         .readiness-bar-wrap {
-          flex: 1; min-width: 120px; height: 8px;
-          background: var(--bg3); border-radius: 4px; overflow: hidden;
+          flex: 1; min-width: 120px; height: 6px;
+          background: var(--bg3); border-radius: 3px; overflow: hidden;
         }
         .readiness-bar-fill {
-          height: 100%; border-radius: 4px;
+          height: 100%; border-radius: 3px;
           background: linear-gradient(to right, var(--accent), var(--blue));
           transition: width 1s ease;
-          animation: progressGlow 3s infinite ease-in-out;
         }
 
-        /* Responsive Premium Step Grid with 240px min width */
         .steps-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-          gap: 20px;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 18px;
         }
-        
-        /* Premium Card Lift & Glow hover transitions */
-        .step-card {
-          padding: 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          position: relative;
-          overflow: hidden;
-          background: #fff;
-          transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-        }
-        .step-card:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 16px 36px rgba(43, 174, 142, 0.14);
-        }
-        
-        /* Translucent Background Watermark Stage Number */
-        .step-card-watermark {
-          position: absolute;
-          right: 8px;
-          bottom: -15px;
-          font-size: 80px;
-          font-weight: 800;
-          color: var(--border);
-          opacity: 0.18;
-          z-index: 1;
-          pointer-events: none;
-          user-select: none;
-          font-family: var(--font-display);
-        }
-
-        .step-card-top {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          z-index: 2;
-        }
+        .step-card { padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+        .step-card-top { display: flex; align-items: center; justify-content: space-between; }
         .step-num {
           width: 34px; height: 34px; border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
           font-weight: 700; font-size: 15px;
         }
-        .step-title {
-          font-size: 17px;
-          font-weight: 600;
-          color: var(--text);
-          z-index: 2;
-          line-height: 1.35;
-        }
-        .step-desc {
-          font-size: 13px;
-          color: var(--text2);
-          line-height: 1.7;
-          white-space: pre-line;
-          z-index: 2;
-        }
+        .step-title { font-size: 17px; font-weight: 600; color: var(--text); }
+        .step-desc  { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-line; }
 
         .step-cta {
-          display: flex; align-items: center; justify-content: space-between;
-          margin-top: auto; font-size: 13px; font-weight: 600;
-          color: var(--accent); padding-top: 10px;
+          display: flex; align-items: center; gap: 5px;
+          margin-top: auto; font-size: 13px; font-weight: 500;
+          color: var(--accent); padding-top: 8px;
           border-top: 1px solid var(--border);
-          z-index: 2;
-        }
-        .step-cta-arrow {
-          display: flex;
-          transition: transform 0.2s ease;
-        }
-        .step-card:hover .step-cta-arrow {
-          transform: translateX(4px);
         }
 
         .blindspots-list { display: flex; flex-direction: column; gap: 12px; }
         .blindspot-card  {
           display: flex; align-items: flex-start; gap: 12px;
           padding: 16px 20px; border-left: 3px solid var(--amber);
-          transition: transform 0.2s ease;
-        }
-        .blindspot-card:hover {
-          transform: translateX(4px);
         }
         .blindspot-icon { display: flex; color: var(--amber); flex-shrink: 0; margin-top: 1px; }
         .blindspot-text { font-size: 14px; color: var(--text2); line-height: 1.7; }
