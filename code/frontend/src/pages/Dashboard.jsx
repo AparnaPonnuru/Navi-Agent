@@ -167,7 +167,7 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
                   {/* <span>{currentCoords || "Coordinates pending"}</span> */}
                 </div>
               </div>
-
+ 
               <div className="route-track">
                 <span />
                 <span />
