@@ -89,20 +89,6 @@ export default function PathResult({ pathData, userInput, onStepClick, onBack })
         })}
       </div>
 
-      {/* Blind spots */}
-      {pathData.blind_spots?.length > 0 && (
-        <div style={{ marginTop: 48 }}>
-          <div className="section-label">Blind spots — what most people miss</div>
-          <div className="blindspots-list">
-            {pathData.blind_spots.map((spot, i) => (
-              <div key={i} className="blindspot-card card">
-                <span className="blindspot-icon"><IconAlert size={18} /></span>
-                <span className="blindspot-text">{spot}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Try another */}
       <div style={{ textAlign: "center", marginTop: 48 }}>
@@ -166,20 +152,13 @@ export default function PathResult({ pathData, userInput, onStepClick, onBack })
         .step-title { font-size: 17px; font-weight: 600; color: var(--text); }
         .step-desc  { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-line; }
 
+
         .step-cta {
           display: flex; align-items: center; gap: 5px;
           margin-top: auto; font-size: 13px; font-weight: 500;
           color: var(--accent); padding-top: 8px;
           border-top: 1px solid var(--border);
         }
-
-        .blindspots-list { display: flex; flex-direction: column; gap: 12px; }
-        .blindspot-card  {
-          display: flex; align-items: flex-start; gap: 12px;
-          padding: 16px 20px; border-left: 3px solid var(--amber);
-        }
-        .blindspot-icon { display: flex; color: var(--amber); flex-shrink: 0; margin-top: 1px; }
-        .blindspot-text { font-size: 14px; color: var(--text2); line-height: 1.7; }
 
         @media (max-width: 600px) {
           .result-route-bar { flex-direction: column; align-items: flex-start; }
