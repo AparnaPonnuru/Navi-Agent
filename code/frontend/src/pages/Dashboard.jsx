@@ -164,7 +164,7 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
                     rows={4}
                     placeholder="Describe where you are today"
                   />
-                  <span>{currentCoords || "Coordinates pending"}</span>
+                  {/* <span>{currentCoords || "Coordinates pending"}</span> */}
                 </div>
               </div>
 
