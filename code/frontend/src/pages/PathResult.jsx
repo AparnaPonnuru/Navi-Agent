@@ -65,7 +65,6 @@ export default function PathResult({ pathData, userInput, onStepClick, onBack })
       <div className="section-label">
         {steps.length} steps · click any to explore
       </div>
-
       <div className="steps-grid">
         {steps.map((step, i) => {
           const c = STEP_COLORS[i % STEP_COLORS.length];

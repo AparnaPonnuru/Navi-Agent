@@ -78,10 +78,21 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
     }, 1800);
 
     try {
+      const profileDetails = profile ? [
+        getProfileValue(profile, "school") !== "Not provided" ? `School: ${getProfileValue(profile, "school")}` : "",
+        getProfileValue(profile, "stream") !== "Not provided" ? `Academic Stream: ${getProfileValue(profile, "stream")}` : "",
+        getProfileValue(profile, "performance") !== "Not provided" ? `Academic Performance: ${getProfileValue(profile, "performance")}` : "",
+        getProfileValue(profile, "personality") !== "Not provided" ? `Personality: ${getProfileValue(profile, "personality")}` : "",
+        getProfileValue(profile, "financialSituation") !== "Not provided" ? `Financial Situation / Budget Constraints: ${getProfileValue(profile, "financialSituation")}` : "",
+        `Location Context: ${[getProfileValue(profile, "city"), getProfileValue(profile, "state"), getProfileValue(profile, "country")].filter(v => v !== "Not provided").join(", ")}`
+      ].filter(Boolean).join(". ") : "";
+
+      const enrichedGoal = `Current Position: ${current}. Target Goal: ${goal}.${profileDetails ? ` User Profile Context (incorporate this carefully into your milestones, resources, advice, and financial planning): ${profileDetails}` : ""}`;
+
       const res = await fetch(`${API}/api/path`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal: `Current: ${current}. Goal: ${goal}` }),
+        body: JSON.stringify({ goal: enrichedGoal }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.detail || "Something went wrong");

@@ -114,11 +114,19 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
 }}
 
 Rules:
+<<<<<<< HEAD
 - Exactly 4 macro milestones.
 - Exactly 3 micro_steps per milestone.
 - Exactly 2 macro_free, 2 micro_structured, 2 nano_expert per milestone.
 - Use real resource names: freeCodeCamp, Coursera, Kaggle, YouTube channels, GitHub repos, books.
 - Tailor everything to the user current position and goal.
+=======
+- Exactly 8 macro milestones.
+- Exactly 3 micro_steps per milestone.
+- Exactly 2 macro_free, 2 micro_structured, 2 nano_expert per milestone.
+- Use real resource names: freeCodeCamp, Coursera, Kaggle, YouTube channels, GitHub repos, books.
+- Tailor everything to the user's current position and goal.
+>>>>>>> origin/feature/ui-redesign
 - No filler, no placeholders, no repeated items.
 """
 
