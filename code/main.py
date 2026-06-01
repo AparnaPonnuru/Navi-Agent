@@ -152,7 +152,7 @@ async def generate_path(req: GoalRequest):
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        model="llama-3.3-70b-versatile",
             max_tokens=8192,
             temperature=0.55,
             messages=[
