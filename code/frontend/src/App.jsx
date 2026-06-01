@@ -1,5 +1,5 @@
 import { useState } from "react";
-import AuthFlow, { useAuth, logout } from "./pages/AuthFlow";
+import AuthFlow, { useAuth, logout } from "./pages/authflow";
 import Dashboard from "./pages/Dashboard";
 import PathResult from "./pages/PathResult";
 import StepDetail from "./pages/StepDetail";

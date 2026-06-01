@@ -80,6 +80,7 @@ export default function Dashboard({ profile, initialCurrent = "", onPathGenerate
     try {
       const profileDetails = profile ? [
         getProfileValue(profile, "school") !== "Not provided" ? `School: ${getProfileValue(profile, "school")}` : "",
+        getProfileValue(profile, "curriculum") !== "Not provided" ? `Curriculum / Board: ${getProfileValue(profile, "curriculum")}` : "",
         getProfileValue(profile, "stream") !== "Not provided" ? `Academic Stream: ${getProfileValue(profile, "stream")}` : "",
         getProfileValue(profile, "performance") !== "Not provided" ? `Academic Performance: ${getProfileValue(profile, "performance")}` : "",
         getProfileValue(profile, "personality") !== "Not provided" ? `Personality: ${getProfileValue(profile, "personality")}` : "",
