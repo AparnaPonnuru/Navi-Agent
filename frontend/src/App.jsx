@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { Routes, Route, useNavigate, useLocation, Navigate } from "react-router-dom";
 import AuthFlow, { useAuth, logout } from "./pages/authflow";
 import Dashboard from "./pages/Dashboard";
 import StepDetail from "./pages/StepDetail";
 import Marketplace from "./pages/Marketplace";
-import AdminReview from "./pages/AdminReview";
+import AdminReview from "./pages/Adminreview";
 import {
   IconArrowLeft,
   IconBuilding,
@@ -25,12 +26,13 @@ function buildPositionLabel(profile) {
 
 export default function App() {
   const { user, profile: savedProfile } = useAuth();
+  const navigate                      = useNavigate();
+  const location                      = useLocation();
 
   const [authed, setAuthed]           = useState(!!user);
   const [activeEmail, setActiveEmail] = useState(user || "");
   const [profile, setProfile]         = useState(savedProfile);
 
-  const [page, setPage]               = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 900);
   const [pathData, setPathData]       = useState(null);
   const [userInput, setUserInput]     = useState({ current: "", goal: "" });
@@ -41,7 +43,7 @@ export default function App() {
     setActiveEmail(email);
     setProfile(profileData);
     setAuthed(true);
-    setPage("dashboard");
+    navigate("/dashboard");
   }
 
   function handleLogout() {
@@ -49,14 +51,32 @@ export default function App() {
     setAuthed(false);
     setActiveEmail("");
     setProfile(null);
-    setPage("dashboard");
     setPathData(null);
     setActiveStep(null);
+    navigate("/dashboard");
   }
 
   if (!authed) return <AuthFlow onAuthenticated={handleAuthenticated} />;
 
-  const goTo = (p) => setPage(p);
+  const goTo = (p) => {
+    const routeMap = {
+      dashboard: "/dashboard",
+      stepdetail: "/step-detail",
+      marketplace: "/marketplace",
+      adminreview: "/admin-review",
+    };
+    navigate(routeMap[p] || "/dashboard");
+    // Auto-close sidebar on mobile after selecting a page
+    if (window.innerWidth <= 900) {
+      setSidebarOpen(false);
+    }
+  };
+
+  const handleGenerationStart = (input) => {
+    setUserInput(input);
+    setPathData(null); // Clear old path while generating
+    setSidebarOpen(false); // Auto-collapse sidebar so the path panel has full width
+  };
 
   const handlePathGenerated = (data, input) => {
     setPathData(data);
@@ -66,6 +86,7 @@ export default function App() {
 
   const handleStepClick = (step) => {
     setActiveStep(step);
+    setActiveView("macro"); // Reset back to macro when exploring a new step
     goTo("stepdetail");
   };
 
@@ -75,25 +96,37 @@ export default function App() {
   };
 
   const handleBack = () => {
-    if (page === "marketplace") goTo("stepdetail");
-    else if (page === "stepdetail") goTo("dashboard");
-    else goTo("dashboard");
+    const currentPath = location.pathname;
+    if (currentPath === "/marketplace") navigate("/step-detail");
+    else if (currentPath === "/step-detail") navigate("/dashboard");
+    else navigate("/dashboard");
   };
 
   const navItems = [
     { key: "dashboard",   label: "Dashboard",     Icon: IconNavigation,  enabled: true },
     { key: "stepdetail",  label: "Step Details",  Icon: IconMap,         enabled: !!activeStep },
     { key: "marketplace", label: "Marketplace",   Icon: IconShoppingCart,enabled: !!activeStep },
-    { key: "adminreview", label: "Admin Review",  Icon: IconCheck,       enabled: !!pathData },
+    { key: "adminreview", label: "Admin Review",  Icon: IconCheck,       enabled: true },
   ];
+
+  const currentPath = location.pathname;
+  const isDashboard = currentPath === "/" || currentPath === "/dashboard";
 
   return (
     <div className={`app-root maps-shell ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
+      
+      {/* Dim backdrop mask for mobile screens */}
+      {sidebarOpen && (
+        <div 
+          className="sidebar-backdrop" 
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
       {/* ── Sidebar ── */}
       <aside className="app-sidebar">
         <div className="sidebar-brand" onClick={() => goTo("dashboard")}>
-          <div className="logo-pill">N</div>
+          <img src="/naavi_logo.png" alt="naavi logo" className="logo-image-sidebar" />
           <div className="sidebar-brand-copy">
             <span className="logo-name">naavi</span>
             <span className="logo-tag">AI Path Engine</span>
@@ -101,18 +134,24 @@ export default function App() {
         </div>
 
         <nav className="sidebar-nav">
-          {navItems.map(item => (
-            <button
-              key={item.key}
-              className={`sidebar-nav-item ${page === item.key ? "active" : ""}`}
-              onClick={() => item.enabled && goTo(item.key)}
-              disabled={!item.enabled}
-              title={item.label}
-            >
-              <span className="sidebar-nav-icon"><item.Icon size={18} /></span>
-              <span className="sidebar-nav-label">{item.label}</span>
-            </button>
-          ))}
+          {navItems.map(item => {
+            const isActive = (item.key === "dashboard" && isDashboard) ||
+                             (item.key === "stepdetail" && currentPath === "/step-detail") ||
+                             (item.key === "marketplace" && currentPath === "/marketplace") ||
+                             (item.key === "adminreview" && currentPath === "/admin-review");
+            return (
+              <button
+                key={item.key}
+                className={`sidebar-nav-item ${isActive ? "active" : ""}`}
+                onClick={() => item.enabled && goTo(item.key)}
+                disabled={!item.enabled}
+                title={item.label}
+              >
+                <span className="sidebar-nav-icon"><item.Icon size={18} /></span>
+                <span className="sidebar-nav-label">{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
         {/* Active route card */}
@@ -127,12 +166,6 @@ export default function App() {
             <span className="mini-route-dot goal" />
             <span>{userInput.goal || "Destination pending"}</span>
           </div>
-          {pathData && (
-            <div className="sidebar-path-meta">
-              <span className="sidebar-meta-chip green">{pathData.readiness_score} readiness</span>
-              <span className="sidebar-meta-chip blue">{pathData.total_duration}</span>
-            </div>
-          )}
           <button className="sidebar-logout-btn" onClick={handleLogout}>Log out</button>
         </div>
       </aside>
@@ -146,7 +179,7 @@ export default function App() {
             <IconMenu size={20} />
           </button>
 
-          {page !== "dashboard" && (
+          {!isDashboard && (
             <button className="nav-back" onClick={handleBack}>
               <IconArrowLeft size={15} /> Back
             </button>
@@ -183,38 +216,51 @@ export default function App() {
 
         {/* Main content */}
         <main className="app-main">
-          {page === "dashboard" && (
-            <Dashboard
-              profile={profile}
-              pathData={pathData}
-              userInput={userInput}
-              initialCurrent={[profile?.grade, profile?.curriculum].filter(Boolean).join(" • ") || ""}
-              onPathGenerated={handlePathGenerated}
-              onStepClick={handleStepClick}
-            />
-          )}
-          {page === "stepdetail" && (
-            <StepDetail
-              step={activeStep}
-              onViewClick={handleViewClick}
-              onBack={() => goTo("dashboard")}
-            />
-          )}
-          {page === "marketplace" && (
-            <Marketplace
-              step={activeStep}
-              view={activeView}
-              onBack={() => goTo("stepdetail")}
-            />
-          )}
-          {page === "adminreview" && (
-            <AdminReview
-              pathData={pathData}
-              userInput={userInput}
-              profile={profile}
-              onBack={() => goTo("dashboard")}
-            />
-          )}
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={
+              <Dashboard
+                profile={profile}
+                pathData={pathData}
+                userInput={userInput}
+                initialCurrent={[profile?.grade, profile?.curriculum].filter(Boolean).join(" • ") || ""}
+                onPathGenerated={handlePathGenerated}
+                onStepClick={handleStepClick}
+                onGenerationStart={handleGenerationStart}
+              />
+            } />
+            <Route path="/step-detail" element={
+              activeStep ? (
+                <StepDetail
+                  step={activeStep}
+                  initialView={activeView}
+                  onViewClick={handleViewClick}
+                  onBack={() => navigate("/dashboard")}
+                />
+              ) : (
+                <Navigate to="/dashboard" replace />
+              )
+            } />
+            <Route path="/marketplace" element={
+              activeStep ? (
+                <Marketplace
+                  step={activeStep}
+                  view={activeView}
+                  onBack={() => navigate("/step-detail")}
+                />
+              ) : (
+                <Navigate to="/dashboard" replace />
+              )
+            } />
+            <Route path="/admin-review" element={
+              <AdminReview
+                pathData={pathData}
+                userInput={userInput}
+                profile={profile}
+                onBack={() => navigate("/dashboard")}
+              />
+            } />
+          </Routes>
         </main>
       </div>
     </div>

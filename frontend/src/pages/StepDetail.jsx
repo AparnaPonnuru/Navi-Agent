@@ -9,7 +9,7 @@ import {
   IconUsers,
   IconUser,
 } from "./Icons";
-     
+
 const VIEWS = [
   { key: "macro", label: "Macro", Icon: IconMap, tag: "pill-teal", desc: "Big picture overview for this phase" },
   { key: "micro", label: "Micro", Icon: IconMicroscope, tag: "pill-blue", desc: "Detailed execution guidance for this step" },
@@ -20,8 +20,8 @@ function richText(value, fallback) {
   return value || fallback || "This step needs focused execution. Clarify the expected outcome, identify the skills required, and complete a small proof of work before moving forward. Use feedback from peers, mentors, or real users to check whether the work is strong enough for the next stage.";
 }
 
-export default function StepDetail({ step, onViewClick }) {
-  const [active, setActive] = useState("macro");
+export default function StepDetail({ step, initialView = "macro", onViewClick }) {
+  const [active, setActive] = useState(initialView);
   if (!step) return null;
 
   const view = VIEWS.find(v => v.key === active);
@@ -132,8 +132,8 @@ export default function StepDetail({ step, onViewClick }) {
       <style>{`
         .sd-header { padding: 28px 28px 24px; margin-bottom: 28px; }
         .sd-header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-        .sd-title { font-family: var(--font-display); font-size: 28px; color: var(--text); margin-bottom: 10px; }
-        .sd-desc { font-size: 15px; color: var(--text2); line-height: 1.8; white-space: pre-line; }
+        .sd-title { font-family: var(--font-display); font-size: 20px; color: var(--text); margin-bottom: 10px; font-weight: 700; }
+        .sd-desc { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-line; }
         .sd-tabs { display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap; }
         .sd-tab {
           display: flex; align-items: center; gap: 8px; padding: 12px 22px;
@@ -150,9 +150,9 @@ export default function StepDetail({ step, onViewClick }) {
         .sd-view-desc { font-size: 14px; color: var(--text2); }
         .step-reading-card { padding: 24px; margin-bottom: 24px; }
         .step-reading-card--micro { border-left: 4px solid var(--blue);  }
-.step-reading-card--nano  { border-left: 4px solid var(--red);   }
+        .step-reading-card--nano  { border-left: 4px solid var(--red);   }
         .macro-ov-title { font-weight: 600; font-size: 14px; margin-bottom: 8px; color: var(--text); }
-        .macro-ov-body { font-size: 15px; color: var(--text2); line-height: 1.85; white-space: pre-line; }
+        .macro-ov-body { font-size: 13px; color: var(--text2); line-height: 1.7; white-space: pre-line; }
         .nano-options { display: flex; flex-direction: column; gap: 14px; }
         .nano-opt { display: flex; align-items: center; gap: 16px; padding: 18px 20px; }
         .nano-opt-icon { display: flex; color: var(--accent); flex-shrink: 0; }

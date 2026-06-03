@@ -24,8 +24,6 @@ const MOCK_DATA = {
       rating: 4.9,
       sessions: 142,
       tags: ["Python", "ML", "Career switch"],
-      macro_price: "Free intro call",
-      micro_price: "₹1,200/hr",
       nano_price: "₹1,500/hr",
       avatar: "PS",
     },
@@ -35,8 +33,6 @@ const MOCK_DATA = {
       rating: 4.8,
       sessions: 98,
       tags: ["Deep Learning", "NLP", "Research"],
-      macro_price: "Free 15-min chat",
-      micro_price: "₹1,500/hr",
       nano_price: "₹2,000/hr",
       avatar: "RM",
     },
@@ -46,8 +42,6 @@ const MOCK_DATA = {
       rating: 5.0,
       sessions: 210,
       tags: ["Data Analysis", "SQL", "Beginners"],
-      macro_price: "Free Q&A",
-      micro_price: "₹900/hr",
       nano_price: "₹1,200/hr",
       avatar: "AP",
     },
@@ -57,8 +51,6 @@ const MOCK_DATA = {
       rating: 4.7,
       sessions: 76,
       tags: ["Cloud", "Pipelines", "AWS"],
-      macro_price: "Free resource list",
-      micro_price: "₹1,100/hr",
       nano_price: "₹1,400/hr",
       avatar: "KR",
     },
@@ -72,7 +64,6 @@ const MOCK_DATA = {
       tags: ["Courses", "Certificates", "Free audit"],
       macro_price: "Free audit",
       micro_price: "₹2,000–₹4,000/course",
-      nano_price: "₹6,000/month (Plus)",
       avatar: "CO",
     },
     {
@@ -82,8 +73,6 @@ const MOCK_DATA = {
       sessions: null,
       tags: ["Free", "Projects", "Community"],
       macro_price: "Completely free",
-      micro_price: "Free",
-      nano_price: "Free",
       avatar: "FC",
     },
     {
@@ -93,8 +82,6 @@ const MOCK_DATA = {
       sessions: null,
       tags: ["Datasets", "Competitions", "Notebooks"],
       macro_price: "Free",
-      micro_price: "Free",
-      nano_price: "Free",
       avatar: "KG",
     },
     {
@@ -103,9 +90,7 @@ const MOCK_DATA = {
       rating: 4.6,
       sessions: null,
       tags: ["Bootcamp", "Placement", "Live classes"],
-      macro_price: "Free trial class",
       micro_price: "₹75,000 (structured)",
-      nano_price: "₹1,50,000 (full program)",
       avatar: "SC",
     },
   ],
@@ -117,8 +102,6 @@ const MOCK_DATA = {
       sessions: null,
       tags: ["B.Tech", "M.Tech", "Research"],
       macro_price: "Free resources online",
-      micro_price: "Entrance exam required",
-      nano_price: "₹2,00,000/year (tuition)",
       avatar: "IH",
     },
     {
@@ -128,8 +111,6 @@ const MOCK_DATA = {
       sessions: null,
       tags: ["AI", "Data Science", "PGDip"],
       macro_price: "Free course audits",
-      micro_price: "Entrance exam required",
-      nano_price: "₹1,80,000/year",
       avatar: "II",
     },
     {
@@ -138,9 +119,7 @@ const MOCK_DATA = {
       rating: 4.5,
       sessions: null,
       tags: ["PG Program", "Industry projects"],
-      macro_price: "Free demo session",
       micro_price: "₹1,25,000 (structured)",
-      nano_price: "₹2,50,000 (full PG)",
       avatar: "UG",
     },
     {
@@ -149,9 +128,7 @@ const MOCK_DATA = {
       rating: 4.4,
       sessions: null,
       tags: ["Certificate", "AI", "Flexible"],
-      macro_price: "Free intro modules",
       micro_price: "₹40,000 (certificate)",
-      nano_price: "₹80,000 (full program)",
       avatar: "GL",
     },
   ],
@@ -162,9 +139,7 @@ const MOCK_DATA = {
       rating: 4.8,
       sessions: null,
       tags: ["Books", "Videos", "Live events"],
-      macro_price: "10-day free trial",
       micro_price: "₹1,500/month",
-      nano_price: "₹2,500/month (team)",
       avatar: "OR",
     },
     {
@@ -173,9 +148,7 @@ const MOCK_DATA = {
       rating: 4.5,
       sessions: null,
       tags: ["Video", "Self-paced", "Affordable"],
-      macro_price: "Free preview lessons",
       micro_price: "₹500–₹1,500/course",
-      nano_price: "₹3,000 (personal plan)",
       avatar: "UD",
     },
     {
@@ -185,8 +158,6 @@ const MOCK_DATA = {
       sessions: null,
       tags: ["Free", "Tutorials", "Channels"],
       macro_price: "Completely free",
-      micro_price: "Free",
-      nano_price: "Free (YouTube Premium optional)",
       avatar: "YT",
     },
     {
@@ -196,8 +167,6 @@ const MOCK_DATA = {
       sessions: null,
       tags: ["Articles", "Community", "Free tier"],
       macro_price: "Free (3 articles/month)",
-      micro_price: "₹350/month (Member)",
-      nano_price: "₹350/month (Member)",
       avatar: "MD",
     },
   ],
@@ -227,15 +196,130 @@ export default function Marketplace({ step, view }) {
   const [activeView, setActiveView] = useState(view || "macro");
   const [search, setSearch] = useState("");
 
+  // Determine available categories dynamically depending on view
+  const availableCats = useMemo(() => {
+    return CATEGORIES.filter(cat => {
+      // Check if mock database has items for this category in the current view
+      const hasMock = (MOCK_DATA[cat.key] || []).some(item => {
+        const price = getPriceForView(item, activeView);
+        return price !== undefined && price !== null;
+      });
+      
+      // Check if AI generated items have any entries for this category in the current view
+      const viewKey = activeView === "macro" ? "macro_free" : activeView === "micro" ? "micro_structured" : "nano_expert";
+      const hasDynamic = (step?.marketplace?.[viewKey] || []).some(item => {
+        const type = (item.type || "").toLowerCase();
+        const name = (item.name || "").toLowerCase();
+        let itemCat = "vendors";
+        if (type.includes("mentor") || type.includes("coach") || type.includes("expert") || type.includes("advisor") || type.includes("review") || type.includes("tutoring") || type.includes("specialist") || type.includes("counselor") || name.includes("mentor") || name.includes("coach")) {
+          itemCat = "mentors";
+        } else if (type.includes("university") || type.includes("college") || type.includes("school") || type.includes("institute") || type.includes("academy") || name.includes("university") || name.includes("college") || name.includes("institute") || name.includes("academy")) {
+          itemCat = "institutions";
+        } else if (type.includes("youtube") || type.includes("docs") || type.includes("community") || type.includes("book") || type.includes("library") || type.includes("articles") || type.includes("github") || type.includes("publication") || type.includes("channel") || type.includes("guide") || name.includes("youtube") || name.includes("book") || name.includes("guide")) {
+          itemCat = "distributors";
+        }
+        return itemCat === cat.key;
+      });
+      
+      return hasMock || hasDynamic;
+    });
+  }, [step, activeView]);
+
+  // Coerce category state to first available if activeCategory is not in the list
+  const currentCategory = useMemo(() => {
+    if (availableCats.some(c => c.key === activeCategory)) {
+      return activeCategory;
+    }
+    return availableCats[0]?.key || "vendors";
+  }, [availableCats, activeCategory]);
+
+  const handleViewChange = (newView) => {
+    setActiveView(newView);
+    setSearch("");
+  };
+
   const items = useMemo(() => {
-    return (MOCK_DATA[activeCategory] || []).filter(item => {
+    const matchedDynamic = [];
+    
+    if (step && step.marketplace) {
+      const viewKey = activeView === "macro" ? "macro_free" : activeView === "micro" ? "micro_structured" : "nano_expert";
+      const rawItems = step.marketplace[viewKey] || [];
+      
+      rawItems.forEach(item => {
+        const type = (item.type || "").toLowerCase();
+        const name = (item.name || "").toLowerCase();
+        
+        let category = "vendors"; // Default fallback
+        if (type.includes("mentor") || type.includes("coach") || type.includes("expert") || type.includes("advisor") || type.includes("review") || type.includes("tutoring") || type.includes("specialist") || type.includes("counselor") || name.includes("mentor") || name.includes("coach")) {
+          category = "mentors";
+        } else if (type.includes("university") || type.includes("college") || type.includes("school") || type.includes("institute") || type.includes("academy") || name.includes("university") || name.includes("college") || name.includes("institute") || name.includes("academy")) {
+          category = "institutions";
+        } else if (type.includes("youtube") || type.includes("docs") || type.includes("community") || type.includes("book") || type.includes("library") || type.includes("articles") || type.includes("github") || type.includes("publication") || type.includes("channel") || type.includes("guide") || name.includes("youtube") || name.includes("book") || name.includes("guide")) {
+          category = "distributors";
+        }
+        
+        if (category === currentCategory) {
+          const price = item.cost || item.price || (activeView === "macro" ? "Free" : "Varies");
+          matchedDynamic.push({
+            name: item.name,
+            role: item.type || (category === "mentors" ? "Expert Guide" : "Learning Resource"),
+            why: item.why || item.value || item.expected_outcomes || "",
+            next_step: item.next_step || item.session_details || "",
+            tags: item.tags || [],
+            price: price,
+            rating: item.rating || "4.8",
+            sessions: item.sessions || (category === "mentors" ? 42 : null),
+            avatar: item.name.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase(),
+            isRecommended: true,
+          });
+        }
+      });
+    }
+    
+    // Get mock items for this category, filtering out items that do not have a price for this view
+    const mockItems = (MOCK_DATA[currentCategory] || [])
+      .filter(item => {
+        const price = getPriceForView(item, activeView);
+        return price !== undefined && price !== null;
+      })
+      .map(item => {
+        const price = getPriceForView(item, activeView);
+        return {
+          ...item,
+          price,
+          why: "",
+          next_step: "",
+          isRecommended: false,
+        };
+      });
+    
+    // Combine them, putting recommended items at the top
+    const combined = [...matchedDynamic, ...mockItems];
+    
+    // Apply search filter
+    return combined.filter(item => {
       if (!search.trim()) return true;
-      const hay = `${item.name} ${item.role} ${item.tags.join(" ")}`.toLowerCase();
+      const hay = `${item.name} ${item.role} ${item.tags.join(" ")} ${item.why} ${item.next_step}`.toLowerCase();
       return hay.includes(search.toLowerCase());
     });
-  }, [activeCategory, search]);
+  }, [step, currentCategory, activeView, search]);
 
-  const activeCat = CATEGORIES.find(c => c.key === activeCategory);
+  const activeCat = CATEGORIES.find(c => c.key === currentCategory);
+
+  const { recommendedItems, standardItems } = useMemo(() => {
+    const recommended = [];
+    const standard = [];
+    
+    items.forEach(item => {
+      if (item.isRecommended) {
+        recommended.push(item);
+      } else {
+        standard.push(item);
+      }
+    });
+    
+    return { recommendedItems: recommended, standardItems: standard };
+  }, [items]);
 
   return (
     <div className="page">
@@ -256,11 +340,13 @@ export default function Marketplace({ step, view }) {
           { key: "macro", label: "Free resources", desc: "No cost options" },
           { key: "micro", label: "Structured",     desc: "Paid courses & tools" },
           { key: "nano",  label: "Expert 1:1",     desc: "Mentors & coaching" },
-        ].map(v => (
+        ]
+        .filter(v => !view || v.key === view)
+        .map(v => (
           <button
             key={v.key}
             className={`mp-view-btn ${activeView === v.key ? "mp-view-btn--active" : ""}`}
-            onClick={() => setActiveView(v.key)}
+            onClick={() => handleViewChange(v.key)}
           >
             <span className="mp-view-label">{v.label}</span>
             <span className="mp-view-desc">{v.desc}</span>
@@ -270,10 +356,10 @@ export default function Marketplace({ step, view }) {
 
       {/* Category tabs */}
       <div className="mp-cats">
-        {CATEGORIES.map(cat => (
+        {availableCats.map(cat => (
           <button
             key={cat.key}
-            className={`mp-cat-btn ${activeCategory === cat.key ? "mp-cat-btn--active" : ""}`}
+            className={`mp-cat-btn ${currentCategory === cat.key ? "mp-cat-btn--active" : ""}`}
             onClick={() => { setActiveCategory(cat.key); setSearch(""); }}
           >
             <span className="mp-cat-icon"><cat.Icon size={16} /></span>
@@ -300,43 +386,116 @@ export default function Marketplace({ step, view }) {
         {items.length} {activeCat?.label.toLowerCase()} · {activeView === "macro" ? "free options" : activeView === "micro" ? "structured options" : "expert options"}
       </div>
 
-      {/* Cards */}
-      <div className="mp-grid">
-        {items.map((item, i) => {
-          const price = getPriceForView(item, activeView);
-          const isFree = price?.toLowerCase().includes("free") || price?.toLowerCase().includes("free");
-          return (
-            <div key={i} className="mp-card card card-clickable">
-              <div className="mp-card-top">
-                <div className="mp-avatar">{item.avatar}</div>
-                <div className="mp-card-info">
-                  <div className="mp-card-name">{item.name}</div>
-                  <div className="mp-card-role">{item.role}</div>
+      {/* Recommended Section */}
+      {recommendedItems.length > 0 && (
+        <div className="mp-section" style={{ marginBottom: 28 }}>
+          <div className="mp-section-title">✨ Recommended for this Step</div>
+          <div className="mp-recommended-grid">
+            {recommendedItems.map((item, i) => {
+              const price = item.price;
+              const isFree = price?.toLowerCase().includes("free") || price?.toLowerCase().includes("free");
+              return (
+                <div key={i} className="mp-card card card-clickable mp-card--recommended">
+                  <div className="mp-recommended-badge">✨ AI Recommended</div>
+                  
+                  <div className="mp-card-top">
+                    <div className="mp-avatar">{item.avatar}</div>
+                    <div className="mp-card-info">
+                      <div className="mp-card-name">{item.name}</div>
+                      <div className="mp-card-role">{item.role}</div>
+                    </div>
+                  </div>
+
+                  <div className="mp-card-tags">
+                    {item.tags.map((t, j) => (
+                      <span key={j} className={`pill ${["pill-teal","pill-blue","pill-lavender"][j % 3]}`}>{t}</span>
+                    ))}
+                  </div>
+
+                  <div className="mp-card-details">
+                    {item.why && (
+                      <div className="mp-detail-row">
+                        <span className="mp-detail-lbl">Why it fits</span>
+                        <span className="mp-detail-val">{item.why}</span>
+                      </div>
+                    )}
+                    {item.next_step && (
+                      <div className="mp-detail-row">
+                        <span className="mp-detail-lbl">Next Action</span>
+                        <span className="mp-detail-val">{item.next_step}</span>
+                      </div>
+                    )}
+                  </div>
+     
+                  <div className="mp-card-bottom">
+                    <div className="mp-card-rating">
+                      <IconStar size={13} fill="var(--amber)" color="var(--amber)" />
+                      <span>{item.rating}</span>
+                      {item.sessions && <span className="mp-sessions">· {item.sessions} sessions</span>}
+                    </div>
+                    <div className="mp-card-price-line">
+                      <span className="mp-price-lbl">Investment</span>
+                      <span className={`mp-card-price ${isFree ? "mp-price-free" : ""}`}>{price}</span>
+                    </div>
+                  </div>
+     
+                  <button className="btn-primary mp-connect-btn">
+                    {getCtaLabel(currentCategory, activeView)}
+                  </button>
                 </div>
-              </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-              <div className="mp-card-tags">
-                {item.tags.map((t, j) => (
-                  <span key={j} className={`pill ${["pill-teal","pill-blue","pill-lavender"][j % 3]}`}>{t}</span>
-                ))}
-              </div>
+      {/* Directory Section */}
+      {standardItems.length > 0 && (
+        <div className="mp-section">
+          {recommendedItems.length > 0 && (
+            <div className="mp-section-title" style={{ marginTop: 24 }}>All Providers</div>
+          )}
+          <div className="mp-grid">
+            {standardItems.map((item, i) => {
+              const price = item.price;
+              const isFree = price?.toLowerCase().includes("free") || price?.toLowerCase().includes("free");
+              return (
+                <div key={i} className="mp-card card card-clickable">
+                  <div className="mp-card-top">
+                    <div className="mp-avatar">{item.avatar}</div>
+                    <div className="mp-card-info">
+                      <div className="mp-card-name">{item.name}</div>
+                      <div className="mp-card-role">{item.role}</div>
+                    </div>
+                  </div>
 
-              <div className="mp-card-bottom">
-                <div className="mp-card-rating">
-                  <IconStar size={13} fill="var(--amber)" color="var(--amber)" />
-                  <span>{item.rating}</span>
-                  {item.sessions && <span className="mp-sessions">· {item.sessions} sessions</span>}
+                  <div className="mp-card-tags">
+                    {item.tags.map((t, j) => (
+                      <span key={j} className={`pill ${["pill-teal","pill-blue","pill-lavender"][j % 3]}`}>{t}</span>
+                    ))}
+                  </div>
+     
+                  <div className="mp-card-bottom">
+                    <div className="mp-card-rating">
+                      <IconStar size={13} fill="var(--amber)" color="var(--amber)" />
+                      <span>{item.rating}</span>
+                      {item.sessions && <span className="mp-sessions">· {item.sessions} sessions</span>}
+                    </div>
+                    <div className="mp-card-price-line">
+                      <span className="mp-price-lbl">Investment</span>
+                      <span className={`mp-card-price ${isFree ? "mp-price-free" : ""}`}>{price}</span>
+                    </div>
+                  </div>
+     
+                  <button className="btn-primary mp-connect-btn">
+                    {getCtaLabel(currentCategory, activeView)}
+                  </button>
                 </div>
-                <div className={`mp-card-price ${isFree ? "mp-price-free" : ""}`}>{price}</div>
-              </div>
-
-              <button className="btn-primary mp-connect-btn">
-                {getCtaLabel(activeCategory, activeView)}
-              </button>
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {items.length === 0 && (
         <div className="mp-empty card">
@@ -351,6 +510,7 @@ export default function Marketplace({ step, view }) {
 
         .mp-view-tabs {
           display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px;
+          align-items: stretch;
         }
         .mp-view-btn {
           display: flex; flex-direction: column; gap: 2px;
@@ -358,12 +518,14 @@ export default function Marketplace({ step, view }) {
           border: 1.5px solid var(--border); background: var(--bg2);
           cursor: pointer; font-family: var(--font-body);
           text-align: left; transition: all 0.2s; flex: 1; min-width: 120px;
+          margin: 0; box-sizing: border-box; outline: none;
+          align-self: stretch;
         }
         .mp-view-btn:hover { border-color: var(--accent); }
         .mp-view-btn--active { border-color: var(--accent); background: var(--accent-soft); }
-        .mp-view-label { font-size: 13px; font-weight: 600; color: var(--text); }
+        .mp-view-label { font-size: 13px; font-weight: 600; color: var(--text); margin: 0; }
         .mp-view-btn--active .mp-view-label { color: var(--accent2); }
-        .mp-view-desc { font-size: 11px; color: var(--text3); }
+        .mp-view-desc { font-size: 11px; color: var(--text3); margin: 0; }
 
         .mp-cats {
           display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;
@@ -394,12 +556,76 @@ export default function Marketplace({ step, view }) {
         }
         .mp-search-input::placeholder { color: var(--text3); }
 
+        .mp-section-title {
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: var(--text3);
+          letter-spacing: 0.08em;
+          margin-bottom: 14px;
+          margin-top: 10px;
+        }
+
+        .mp-recommended-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          gap: 18px;
+          margin-bottom: 24px;
+        }
+
         .mp-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
           gap: 18px;
         }
         .mp-card { display: flex; flex-direction: column; gap: 14px; padding: 22px; }
+        .mp-card--recommended {
+          background: linear-gradient(135deg, #ffffff, #f2faf3);
+          border: 1.5px solid var(--green);
+          position: relative;
+          box-shadow: 0 4px 12px rgba(44, 168, 82, 0.08);
+        }
+        .mp-card--recommended:hover {
+          box-shadow: 0 6px 16px rgba(44, 168, 82, 0.15);
+        }
+        .mp-recommended-badge {
+          position: absolute;
+          top: 12px;
+          right: 12px;
+          font-size: 9px;
+          font-weight: 700;
+          color: var(--green);
+          background: #e6f6ec;
+          padding: 3px 8px;
+          border-radius: 20px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .mp-card-details {
+          font-size: 12px;
+          line-height: 1.5;
+          color: var(--text2);
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          margin-top: 2px;
+        }
+        .mp-detail-row {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .mp-detail-lbl {
+          font-size: 9px;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: var(--text3);
+          letter-spacing: 0.04em;
+        }
+        .mp-detail-val {
+          font-size: 12px;
+          color: var(--text);
+        }
         .mp-card-top { display: flex; align-items: center; gap: 14px; }
         .mp-avatar {
           width: 46px; height: 46px; border-radius: 12px;
@@ -409,16 +635,19 @@ export default function Marketplace({ step, view }) {
         }
         .mp-card-name { font-size: 15px; font-weight: 600; color: var(--text); }
         .mp-card-role { font-size: 12px; color: var(--text2); margin-top: 2px; line-height: 1.4; }
-        .mp-card-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        .mp-card-tags { display: flex; flex-wrap: wrap; gap: 6px; min-height: 44px; align-content: flex-start; }
         .mp-card-bottom {
-          display: flex; align-items: center; justify-content: space-between;
+          display: flex; flex-direction: column; gap: 6px;
           padding-top: 10px; border-top: 1px solid var(--border);
+          margin-top: auto;
         }
-        .mp-card-rating { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--text2); }
+        .mp-card-rating { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); }
         .mp-sessions { color: var(--text3); }
-        .mp-card-price { font-size: 14px; font-weight: 600; color: var(--accent2); }
-        .mp-price-free { color: var(--accent); }
-        .mp-connect-btn { width: 100%; justify-content: center; padding: 11px; font-size: 14px; }
+        .mp-card-price-line { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+        .mp-price-lbl { color: var(--text3); font-size: 12px; font-weight: 500; }
+        .mp-card-price { font-size: 13px; font-weight: 600; color: var(--accent2); }
+        .mp-price-free { color: var(--accent); background: var(--green-soft); padding: 2px 8px; border-radius: 6px; }
+        .mp-connect-btn { width: 100%; justify-content: center; padding: 11px; font-size: 14px; margin-top: 4px; }
 
         .mp-empty { text-align: center; padding: 48px; }
         .mp-empty-icon { display: flex; justify-content: center; color: var(--text3); margin-bottom: 12px; }
