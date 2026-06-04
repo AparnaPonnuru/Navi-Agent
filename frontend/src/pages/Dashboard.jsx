@@ -42,20 +42,13 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   const [loadMsg, setLoadMsg] = useState("");
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState(null);
-  const [loadingTime, setLoadingTime] = useState(0);
 
-  useEffect(() => {
-    let interval;
-    if (loading) {
-      setLoadingTime(0);
-      interval = setInterval(() => {
-        setLoadingTime(t => t + 1);
-      }, 1000);
-    } else {
-      setLoadingTime(0);
-    }
-    return () => clearInterval(interval);
-  }, [loading]);
+  // New real-time staged progress states
+  const [loaderProgress, setLoaderProgress] = useState(0);
+  const [step1Status, setStep1Status] = useState("pending");
+  const [step2Status, setStep2Status] = useState("pending");
+  const [step3Status, setStep3Status] = useState("pending");
+  const [terminalLogs, setTerminalLogs] = useState([]);
 
   async function generate() {
     if (!current.trim() || !goal.trim()) return;
@@ -64,14 +57,50 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
     }
     setLoading(true);
     setError("");
-    let i = 0;
-    setLoadMsg(LOADING_MSGS[0]);
-    const iv = setInterval(() => {
-      i = (i + 1) % LOADING_MSGS.length;
-      setLoadMsg(LOADING_MSGS[i]);
+    
+    // Set initial loader state
+    setLoaderProgress(5);
+    setStep1Status("active");
+    setStep2Status("pending");
+    setStep3Status("pending");
+    
+    const initialTime = new Date().toLocaleTimeString();
+    const startLogs = [
+      { text: `🕒 [${initialTime}] Starting Career Path generation pipeline...`, type: "normal" },
+      { text: "➔ [Agent 1] Requesting blueprint from Llama-3 70B model...", type: "green" }
+    ];
+    setTerminalLogs(startLogs);
+    
+    let currentProgress = 5;
+    let stage = "blueprint_loading"; // "blueprint_loading" | "audit_loading" | "finalizing"
+    
+    // Interval to simulate ticking up to caps
+    const progressInterval = setInterval(() => {
+      if (stage === "blueprint_loading") {
+        currentProgress = Math.min(48, currentProgress + Math.floor(Math.random() * 4 + 1));
+        setLoaderProgress(currentProgress);
+        setTerminalLogs(prev => {
+          if (prev.length === 2 && currentProgress > 20) {
+            return [...prev, { text: "➔ [Agent 1] Drafting initial 4-milestone roadmap...", type: "normal" }];
+          }
+          return prev;
+        });
+      } else if (stage === "audit_loading") {
+        currentProgress = Math.min(95, currentProgress + Math.floor(Math.random() * 3 + 1));
+        setLoaderProgress(currentProgress);
+      }
+    }, 200);
+
+    setLoadMsg("Mapping your journey...");
+    let msgIndex = 0;
+    const msgInterval = setInterval(() => {
+      msgIndex = (msgIndex + 1) % LOADING_MSGS.length;
+      setLoadMsg(LOADING_MSGS[msgIndex]);
     }, 1800);
+
     try {
-      const res = await fetch(`${API}/api/path`, {
+      // Stage 1: Fetch blueprint from backend (Agent 1)
+      const blueprintRes = await fetch(`${API}/api/path/blueprint`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -80,16 +109,79 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
           profile: profile
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.detail || "Something went wrong");
-      onPathGenerated(json, { current, goal });
+      const blueprintData = await blueprintRes.json();
+      if (!blueprintRes.ok) throw new Error(blueprintData.detail || "Blueprint generation failed");
+      
+      // Update logs for Stage 1 completion
+      setTerminalLogs(prev => [
+        ...prev,
+        { text: "✓ [Agent 1] Blueprint successfully generated.", type: "green" },
+        { text: `🕒 [${new Date().toLocaleTimeString()}] Dispatched parallel auditing tasks to Agents 2, 3 & 4...`, type: "normal" },
+        { text: "➔ [Agent 2] Auditing overall path structure and readiness score...", type: "blue" },
+        { text: "➔ [Agent 3] Refinement of milestone descriptions and check-lists...", type: "blue" },
+        { text: "➔ [Agent 4] Validating marketplace recommendations and prices...", type: "blue" }
+      ]);
+      
+      // Advance to stage 2
+      stage = "audit_loading";
+      currentProgress = 50;
+      setLoaderProgress(50);
+      setStep1Status("completed");
+      setStep2Status("active");
+
+      // Stage 2: Fetch audited/final roadmap (Agents 2, 3, 4)
+      const auditRes = await fetch(`${API}/api/path/audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blueprint: blueprintData,
+          current_position: current,
+          target_goal: goal,
+          profile: profile
+        }),
+      });
+      const finalData = await auditRes.json();
+      if (!auditRes.ok) throw new Error(finalData.detail || "Audit processing failed");
+
+      // Stage 3: Finalizing
+      stage = "finalizing";
+      setStep2Status("completed");
+      setStep3Status("active");
+      
+      setTerminalLogs(prev => [
+        ...prev,
+        { text: "✓ [Audit Pipeline] Verification and resources audit completed.", type: "green" },
+        { text: "➔ [Sanitizer] Scrubbing personal name tokens from descriptions...", type: "normal" }
+      ]);
+      setLoaderProgress(98);
+
+      // Add a slight delay for realistic processing stages
+      await new Promise(resolve => setTimeout(resolve, 600));
+      setTerminalLogs(prev => [
+        ...prev,
+        { text: "➔ [MongoDB] Caching finalized path document to Database...", type: "normal" }
+      ]);
+      setLoaderProgress(100);
+      setStep3Status("completed");
+      setTerminalLogs(prev => [
+        ...prev,
+        { text: "✓ [Pipeline] Job completed. Rendering career pathway map.", type: "green" }
+      ]);
+
+      // Brief pause at 100% so user can appreciate the success state
+      await new Promise(resolve => setTimeout(resolve, 800));
+      clearInterval(progressInterval);
+      clearInterval(msgInterval);
+      setLoading(false);
+      onPathGenerated(finalData, { current, goal });
+
     } catch (e) {
+      clearInterval(progressInterval);
+      clearInterval(msgInterval);
+      setLoading(false);
       setError(e.message.includes("fetch")
         ? "Cannot connect to backend. Run: uvicorn main:app --reload --port 8000"
         : e.message);
-    } finally {
-      clearInterval(iv);
-      setLoading(false);
     }
   }
 
@@ -209,16 +301,16 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
 
               {/* Progress bar */}
               <div className="loader-progress-bar-wrapper">
-                <div className="loader-progress-bar" style={{ width: `${Math.min(98, Math.floor((loadingTime / 40) * 100))}%` }} />
-                <span className="loader-progress-text">{Math.min(98, Math.floor((loadingTime / 40) * 100))}%</span>
+                <div className="loader-progress-bar" style={{ width: `${loaderProgress}%` }} />
+                <span className="loader-progress-text">{loaderProgress}%</span>
               </div>
 
               {/* Pipeline Steps */}
               <div className="loader-pipeline">
                 {/* Agent 1 */}
-                <div className={`loader-pipeline-step ${loadingTime < 15 ? "active" : "completed"}`}>
+                <div className={`loader-pipeline-step ${step1Status}`}>
                   <div className="step-indicator">
-                    {loadingTime >= 15 ? "✓" : <div className="spinner-inner" />}
+                    {step1Status === "completed" ? "✓" : step1Status === "active" ? <div className="spinner-inner" /> : ""}
                   </div>
                   <div className="step-content">
                     <span className="step-title">Agent 1: Blueprint Generator</span>
@@ -227,9 +319,9 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                 </div>
 
                 {/* Agent 2, 3, 4 (Auditing) */}
-                <div className={`loader-pipeline-step ${loadingTime >= 15 && loadingTime < 32 ? "active" : loadingTime >= 32 ? "completed" : "pending"}`}>
+                <div className={`loader-pipeline-step ${step2Status}`}>
                   <div className="step-indicator">
-                    {loadingTime >= 32 ? "✓" : (loadingTime >= 15 ? <div className="spinner-inner" /> : "")}
+                    {step2Status === "completed" ? "✓" : step2Status === "active" ? <div className="spinner-inner" /> : ""}
                   </div>
                   <div className="step-content">
                     <span className="step-title">Agents 2, 3 & 4: Path & Resource Auditors</span>
@@ -238,9 +330,9 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                 </div>
 
                 {/* Sanitizer & Cache */}
-                <div className={`loader-pipeline-step ${loadingTime >= 32 && loadingTime < 36 ? "active" : loadingTime >= 36 ? "completed" : "pending"}`}>
+                <div className={`loader-pipeline-step ${step3Status}`}>
                   <div className="step-indicator">
-                    {loadingTime >= 36 ? "✓" : (loadingTime >= 32 ? <div className="spinner-inner" /> : "")}
+                    {step3Status === "completed" ? "✓" : step3Status === "active" ? <div className="spinner-inner" /> : ""}
                   </div>
                   <div className="step-content">
                     <span className="step-title">Post-Processing & Storage</span>
@@ -258,18 +350,16 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                   <span className="terminal-title">Path Engine Logs</span>
                 </div>
                 <div className="terminal-body">
-                  {loadingTime >= 0 && <div className="terminal-log-line font-mono">🕒 [{new Date().toLocaleTimeString()}] Starting Career Path generation pipeline...</div>}
-                  {loadingTime >= 2 && <div className="terminal-log-line font-mono green-text">➔ [Agent 1] Requesting blueprint from Llama-3 70B model...</div>}
-                  {loadingTime >= 8 && <div className="terminal-log-line font-mono">➔ [Agent 1] Drafting initial 4-milestone roadmap...</div>}
-                  {loadingTime >= 15 && <div className="terminal-log-line font-mono green-text">✓ [Agent 1] Blueprint successfully generated.</div>}
-                  {loadingTime >= 15 && <div className="terminal-log-line font-mono">🕒 [{new Date().toLocaleTimeString()}] Dispatched parallel auditing tasks to Agents 2, 3 & 4...</div>}
-                  {loadingTime >= 17 && <div className="terminal-log-line font-mono blue-text">➔ [Agent 2] Auditing overall path structure and readiness score...</div>}
-                  {loadingTime >= 20 && <div className="terminal-log-line font-mono blue-text">➔ [Agent 3] Refinement of milestone descriptions and check-lists...</div>}
-                  {loadingTime >= 23 && <div className="terminal-log-line font-mono blue-text">➔ [Agent 4] Validating marketplace recommendations and prices...</div>}
-                  {loadingTime >= 32 && <div className="terminal-log-line font-mono green-text">✓ [Audit Pipeline] Verification and resources audit completed.</div>}
-                  {loadingTime >= 32 && <div className="terminal-log-line font-mono">➔ [Sanitizer] Scrubbing personal name tokens from descriptions...</div>}
-                  {loadingTime >= 34 && <div className="terminal-log-line font-mono">➔ [MongoDB] Caching finalized path document to Database...</div>}
-                  {loadingTime >= 36 && <div className="terminal-log-line font-mono green-text">✓ [Pipeline] Job completed. Rendering career pathway map.</div>}
+                  {terminalLogs.map((log, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`terminal-log-line font-mono ${
+                        log.type === "green" ? "green-text" : log.type === "blue" ? "blue-text" : ""
+                      }`}
+                    >
+                      {log.text}
+                    </div>
+                  ))}
                   <div className="terminal-cursor" />
                 </div>
               </div>

@@ -39,6 +39,12 @@ class PathGenerationRequest(BaseModel):
     target_goal: str
     profile: Optional[dict] = None
 
+class PathAuditRequest(BaseModel):
+    blueprint: dict
+    current_position: str
+    target_goal: str
+    profile: Optional[dict] = None
+
 class GoalRequest(BaseModel):
     # Backward compatibility
     goal: str
@@ -797,6 +803,141 @@ async def generate_path(req: PathGenerationRequest):
             print(f"[MongoDB] Cached fallback roadmap {final_json['db_id']} under review successfully.")
         except Exception as db_err:
             print(f"[MongoDB Warning] Failed to cache fallback roadmap to database: {db_err}")
+            final_json["db_id"] = "fallback_mock_id"
+            final_json["status"] = "under_admin_review"
+            
+        return final_json
+
+
+@app.post("/api/path/blueprint")
+async def generate_path_blueprint(req: PathGenerationRequest):
+    current = req.current_position.strip()
+    goal = req.target_goal.strip()
+    profile = req.profile or {}
+    
+    if not current or not goal:
+        raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
+    
+    try:
+        blueprint = await run_agent_1_blueprint(current, goal, profile)
+        return blueprint
+    except Exception as e:
+        print(f"[Blueprint API Error] {e}")
+        return get_fallback_mock_roadmap(current, goal, profile)
+
+
+@app.post("/api/path/audit")
+async def generate_path_audit(req: PathAuditRequest):
+    blueprint = req.blueprint
+    current = req.current_position.strip()
+    goal = req.target_goal.strip()
+    profile = req.profile or {}
+    
+    try:
+        # Trigger Agents 2, 3, and 4 in parallel using asyncio.gather
+        agent2_task = run_agent_2_path_auditor(blueprint, current, goal, profile)
+        agent3_task = run_agent_3_steps_auditor(blueprint, current, goal, profile)
+        agent4_task = run_agent_4_marketplace_auditor(blueprint, current, goal, profile)
+        
+        path_audit, steps_audit, market_audit = await asyncio.gather(
+            agent2_task, agent3_task, agent4_task,
+            return_exceptions=True
+        )
+        
+        # Handle exceptions gracefully
+        if isinstance(path_audit, Exception): 
+            print(f"Agent 2 Error: {path_audit}")
+            path_audit = {}
+        if isinstance(steps_audit, Exception): 
+            print(f"Agent 3 Error: {steps_audit}")
+            steps_audit = []
+        if isinstance(market_audit, Exception): 
+            print(f"Agent 4 Error: {market_audit}")
+            market_audit = []
+        
+        # Merge parallel agent outputs
+        final_macro_path = []
+        blueprint_milestones = blueprint.get("macro_path", [])
+        
+        for i, orig_milestone in enumerate(blueprint_milestones):
+            m_id = orig_milestone.get("id", i + 1)
+            
+            # Fetch step details and views audited by Agent 3
+            audited_step = next((m for m in steps_audit if m.get("id") == m_id), {})
+            
+            # Fetch marketplace audited by Agent 4
+            audited_market = next((m.get("marketplace") for m in market_audit if m.get("id") == m_id), None)
+            
+            merged_milestone = {
+                "id": m_id,
+                "title": audited_step.get("title") or orig_milestone.get("title", f"Milestone {m_id}"),
+                "duration": audited_step.get("duration") or orig_milestone.get("duration", "3 months"),
+                "description": audited_step.get("description") or orig_milestone.get("description", ""),
+                "learning_objectives": audited_step.get("learning_objectives") or orig_milestone.get("learning_objectives", []),
+                "macro_view": audited_step.get("macro_view") or orig_milestone.get("macro_view", ""),
+                "micro_view": audited_step.get("micro_view") or orig_milestone.get("micro_view", ""),
+                "nano_view": audited_step.get("nano_view") or orig_milestone.get("nano_view", ""),
+                "marketplace": audited_market or orig_milestone.get("marketplace") or {"macro_free": [], "micro_structured": [], "nano_expert": []},
+                "micro_steps": audited_step.get("micro_steps") or orig_milestone.get("micro_steps") or []
+            }
+            final_macro_path.append(merged_milestone)
+        
+        final_json = {
+            "path_title": path_audit.get("path_title") or blueprint.get("path_title") or f"Academic Pathway to {goal}",
+            "path_description": path_audit.get("path_description") or blueprint.get("path_description") or f"Detailed strategy blueprint for achieving target goal: {goal}.",
+            "readiness_score": path_audit.get("readiness_score") or blueprint.get("readiness_score", 15),
+            "readiness_label": path_audit.get("readiness_label") or blueprint.get("readiness_label", "Standard Grade"),
+            "total_duration": blueprint.get("total_duration", "12 months"),
+            "macro_path": final_macro_path,
+            "blind_spots": path_audit.get("blind_spots") or blueprint.get("blind_spots") or []
+        }
+        
+        # Post-process — sanitize all personal names out of the final JSON
+        name_tokens = build_name_patterns(profile, current)
+        if name_tokens:
+            print(f"[Sanitizer] Scrubbing personal name tokens: {name_tokens}")
+            final_json = recursive_sanitize(final_json, name_tokens)
+            print("[Sanitizer] Personal name sanitization complete.")
+        
+        # Persist to MongoDB with 'under_admin_review' status
+        path_doc = {
+            "query": f"Current: {current}. Goal: {goal}.",
+            "current_position": current,
+            "target_goal": goal,
+            "profile": profile,
+            "roadmap_data": final_json,
+            "status": "under_admin_review",
+            "created_at": datetime.datetime.utcnow()
+        }
+        
+        insert_result = await paths_collection.insert_one(path_doc)
+        final_json["db_id"] = str(insert_result.inserted_id)
+        final_json["status"] = "under_admin_review"
+        
+        print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
+        return final_json
+        
+    except Exception as e:
+        print(f"[AI Pipeline Warning] Exception occurred during audit: {e}. Recovering with fallback.")
+        final_json = get_fallback_mock_roadmap(current, goal, profile)
+        name_tokens = build_name_patterns(profile, current)
+        if name_tokens:
+            final_json = recursive_sanitize(final_json, name_tokens)
+        
+        try:
+            path_doc = {
+                "query": f"Current: {current}. Goal: {goal}.",
+                "current_position": current,
+                "target_goal": goal,
+                "profile": profile,
+                "roadmap_data": final_json,
+                "status": "under_admin_review",
+                "created_at": datetime.datetime.utcnow()
+            }
+            insert_result = await paths_collection.insert_one(path_doc)
+            final_json["db_id"] = str(insert_result.inserted_id)
+            final_json["status"] = "under_admin_review"
+        except Exception:
             final_json["db_id"] = "fallback_mock_id"
             final_json["status"] = "under_admin_review"
             
