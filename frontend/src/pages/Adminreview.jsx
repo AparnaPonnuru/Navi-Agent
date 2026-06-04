@@ -1,391 +1,1510 @@
-import { useState } from "react";
-import { IconCheck, IconAlert, IconArrowLeft, IconUser, IconMap, IconTarget, IconPin } from "./Icons";
+import { useState, useEffect } from "react";
+import { 
+  IconCheck, IconAlert, IconArrowLeft, IconUser, 
+  IconMap, IconTarget, IconPin, IconSearch, IconNavigation,
+  IconRoute, IconBuilding
+} from "./Icons";
 
-const STATUS = { pending: "pending", approved: "approved", rejected: "rejected" };
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export default function AdminReview({ pathData, userInput, profile, onBack }) {
-  const [stepStatuses, setStepStatuses]   = useState({});
-  const [overallStatus, setOverallStatus] = useState(STATUS.pending);
-  const [notes, setNotes]                 = useState({});
-  const [submitted, setSubmitted]         = useState(false);
-  const [globalNote, setGlobalNote]       = useState("");
+const STATUS = {
+  under_review: "under_admin_review",
+  published: "published",
+  rejected: "rejected"
+};
 
-  if (!pathData) {
-    return (
-      <div className="page">
-        <div className="ar-empty card">
-          <IconAlert size={32} />
-          <div>
-            <h3>No path to review</h3>
-            <p>Generate a path from the Dashboard first.</p>
-          </div>
-          <button className="btn-ghost" onClick={onBack}><IconArrowLeft size={15} /> Back</button>
-        </div>
-      </div>
-    );
+export default function AdminReview({ pathData: initialPathData, userInput, profile, onBack }) {
+  const [pathsQueue, setPathsQueue] = useState([]);
+  const [selectedPath, setSelectedPath] = useState(null);
+  const [loadingQueue, setLoadingQueue] = useState(false);
+  const [loadingSubmit, setLoadingSubmit] = useState(false);
+  const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState("under_admin_review");
+  const [successMsg, setSuccessMsg] = useState("");
+
+  // Editor states (bound to selected path)
+  const [editedRoadmap, setEditedRoadmap] = useState(null);
+  const [globalNote, setGlobalNote] = useState("");
+
+  // Load the queue of paths from MongoDB
+  async function loadQueue() {
+    setLoadingQueue(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/api/admin/paths?status=all`);
+      if (!res.ok) throw new Error("Failed to fetch paths under review");
+      const json = await res.json();
+      setPathsQueue(json);
+      
+      // Proactively select the current session path if it exists
+      if (initialPathData && initialPathData.db_id && !selectedPath) {
+        const found = json.find(p => p.id === initialPathData.db_id);
+        if (found) {
+          selectPathForReview(found);
+        }
+      }
+    } catch (e) {
+      setError("Cannot load admin review queue. Verify the backend is running.");
+      console.error(e);
+    } finally {
+      setLoadingQueue(false);
+    }
   }
 
-  const steps = pathData.macro_path || [];
+  useEffect(() => {
+    loadQueue();
+  }, []);
 
-  function setStepStatus(id, status) {
-    setStepStatuses(prev => ({ ...prev, [id]: status }));
+  // Set up local editor state when a path is selected
+  function selectPathForReview(pathDoc) {
+    setSelectedPath(pathDoc);
+    setEditedRoadmap(JSON.parse(JSON.stringify(pathDoc.roadmap_data))); // deep copy
+    setGlobalNote(pathDoc.admin_notes || "");
+    setSuccessMsg("");
   }
-  function setStepNote(id, note) {
-    setNotes(prev => ({ ...prev, [id]: note }));
+
+  // Handle inline changes in the editor
+  function handleMilestoneChange(index, field, value) {
+    setEditedRoadmap(prev => {
+      const copy = { ...prev };
+      copy.macro_path[index][field] = value;
+      return copy;
+    });
   }
 
-  function handleSubmit() {
-    setSubmitted(true);
+  // Handle marketplace resource changes in the editor
+  function handleMarketplaceChange(mIndex, type, rIndex, field, value) {
+    setEditedRoadmap(prev => {
+      const copy = { ...prev };
+      copy.macro_path[mIndex].marketplace[type][rIndex][field] = value;
+      return copy;
+    });
   }
 
-  const approvedCount = Object.values(stepStatuses).filter(s => s === STATUS.approved).length;
-  const rejectedCount = Object.values(stepStatuses).filter(s => s === STATUS.rejected).length;
-  const pendingCount  = steps.length - approvedCount - rejectedCount;
-
-  if (submitted) {
-    return (
-      <div className="page">
-        <div className="ar-success card">
-          <div className="ar-success-icon">
-            <IconCheck size={32} />
-          </div>
-          <h2 className="ar-success-title">Review Submitted</h2>
-          <p className="ar-success-sub">
-            The path has been marked as <strong>{overallStatus}</strong> with {approvedCount} steps approved, {rejectedCount} rejected, and {pendingCount} pending.
-          </p>
-          <div className="ar-success-meta">
-            <div className="ar-meta-row"><span>Student</span><strong>{profile?.name || userInput.current}</strong></div>
-            <div className="ar-meta-row"><span>Goal</span><strong>{userInput.goal}</strong></div>
-            <div className="ar-meta-row"><span>Decision</span>
-              <strong className={`ar-status-badge ar-status-${overallStatus}`}>{overallStatus}</strong>
-            </div>
-          </div>
-          {globalNote && (
-            <div className="ar-note-preview">
-              <div className="ar-note-preview-label">Admin notes</div>
-              <p>{globalNote}</p>
-            </div>
-          )}
-          <button className="btn-ghost" onClick={onBack} style={{ marginTop: 8 }}>
-            <IconArrowLeft size={15} /> Back to Dashboard
-          </button>
-        </div>
-
-        <style>{`${sharedStyles}`}</style>
-      </div>
-    );
+  // Handle micro step changes in the editor
+  function handleMicroStepChange(mIndex, sIndex, field, value) {
+    setEditedRoadmap(prev => {
+      const copy = { ...prev };
+      copy.macro_path[mIndex].micro_steps[sIndex][field] = value;
+      return copy;
+    });
   }
+
+  // Handle general roadmap metric changes
+  function handleGeneralChange(field, value) {
+    setEditedRoadmap(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  }
+
+  // Submit the approved & curated roadmap back to MongoDB
+  async function submitReview(statusToSet = STATUS.published) {
+    if (!selectedPath || !editedRoadmap) return;
+    setLoadingSubmit(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/api/paths/${selectedPath.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roadmap_data: editedRoadmap,
+          status: statusToSet
+        })
+      });
+      if (!res.ok) throw new Error("Failed to update career path in database");
+      
+      setSuccessMsg(`Successfully marked roadmap as ${statusToSet.toUpperCase()}!`);
+      setSelectedPath(null);
+      setEditedRoadmap(null);
+      loadQueue();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoadingSubmit(false);
+    }
+  }
+
+  // Filter queue based on tab selection and search
+  const displayedPaths = pathsQueue.filter(p => p.status === filterStatus);
+  const filteredPaths = displayedPaths.filter(p => {
+    const q = searchQuery.toLowerCase();
+    const matchesGoal = p.target_goal?.toLowerCase().includes(q);
+    const matchesPos = p.current_position?.toLowerCase().includes(q);
+    const matchesEmail = p.profile?.email?.toLowerCase().includes(q) || p.profile?.name?.toLowerCase().includes(q);
+    return matchesGoal || matchesPos || matchesEmail;
+  });
+
+  const isReadOnly = selectedPath?.status === "published";
 
   return (
     <div className="page ar-page">
-
-      {/* Header */}
-      <div className="ar-header">
-        <div>
-          <div className="pill pill-amber" style={{ marginBottom: 12 }}>Admin Review</div>
-          <h1 className="display-title" style={{ fontSize: 28 }}>Review Generated Path</h1>
-          <p className="ar-header-sub">
-            Review each step and approve or flag for revision before the path is shown to the student.
-          </p>
-        </div>
-        <div className="ar-header-stats">
-          <div className="ar-stat-card ar-stat-green">
-            <span className="ar-stat-val">{approvedCount}</span>
-            <span className="ar-stat-lbl">Approved</span>
-          </div>
-          <div className="ar-stat-card ar-stat-red">
-            <span className="ar-stat-val">{rejectedCount}</span>
-            <span className="ar-stat-lbl">Rejected</span>
-          </div>
-          <div className="ar-stat-card ar-stat-gray">
-            <span className="ar-stat-val">{pendingCount}</span>
-            <span className="ar-stat-lbl">Pending</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Route summary */}
-      <div className="ar-route-card card">
-        <div className="ar-route-row">
-          <div className="ar-route-point">
-            <div className="ar-route-dot green" />
-            <div>
-              <div className="ar-route-label">Current</div>
-              <div className="ar-route-val">{userInput.current}</div>
-            </div>
-          </div>
-          <div className="ar-route-arrow">→</div>
-          <div className="ar-route-point">
-            <div className="ar-route-dot red" />
-            <div>
-              <div className="ar-route-label">Goal</div>
-              <div className="ar-route-val">{userInput.goal}</div>
-            </div>
-          </div>
-          <div className="ar-route-meta">
-            <span className="pill pill-teal">{pathData.readiness_label}</span>
-            <span className="pill pill-blue">{pathData.total_duration}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Step-by-step review */}
-      <div className="ar-steps-section">
-        <div className="section-label">Step-by-step review</div>
-
-        {steps.map((step, i) => {
-          const status = stepStatuses[step.id] || STATUS.pending;
-          return (
-            <div key={step.id} className={`ar-step-card card ar-step-${status}`}>
-              <div className="ar-step-top">
-                <div className="ar-step-num">{step.id}</div>
-                <div className="ar-step-info">
-                  <div className="ar-step-title">{step.title}</div>
-                  <div className="ar-step-dur">{step.duration}</div>
-                </div>
-                <div className="ar-step-actions">
-                  <button 
-                    className={`ar-action-btn ar-approve ${status === STATUS.approved ? "active" : ""}`}
-                    onClick={() => setStepStatus(step.id, STATUS.approved)}
-                  >
-                    <IconCheck size={14} /> Approve
-                  </button>
-                  <button
-                    className={`ar-action-btn ar-reject ${status === STATUS.rejected ? "active" : ""}`}
-                    onClick={() => setStepStatus(step.id, STATUS.rejected)}
-                  >
-                    <IconAlert size={14} /> Flag
-                  </button>
-                </div>
-              </div>
-
-              <p className="ar-step-desc">{step.description}</p>
-
-              {/* Views summary */}
-              <div className="ar-views-row">
-                {step.macro_view && (
-                  <div className="ar-view-chip ar-view-macro">
-                    <span>Macro</span>
-                    <p>{step.macro_view}</p>
-                  </div>
-                )}
-                {step.micro_view && (
-                  <div className="ar-view-chip ar-view-micro">
-                    <span>Micro</span>
-                    <p>{step.micro_view}</p>
-                  </div>
-                )}
-                {step.nano_view && (
-                  <div className="ar-view-chip ar-view-nano">
-                    <span>Nano</span>
-                    <p>{step.nano_view}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Note input */}
-              <div className="ar-note-row">
-                <input
-                  className="ar-note-input"
-                  placeholder="Add a note for this step (optional)..."
-                  value={notes[step.id] || ""}
-                  onChange={e => setStepNote(step.id, e.target.value)}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Overall decision */}
-      <div className="ar-decision-card card">
-        <div className="section-label">Overall decision</div>
-        <div className="ar-decision-btns">
-          {[STATUS.approved, STATUS.pending, STATUS.rejected].map(s => (
-            <button
-              key={s}
-              className={`ar-decision-btn ar-decision-${s} ${overallStatus === s ? "active" : ""}`}
-              onClick={() => setOverallStatus(s)}
-            >
-              {s === STATUS.approved ? <IconCheck size={15} /> : <IconAlert size={15} />}
-              {s.charAt(0).toUpperCase() + s.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        <textarea
-          className="ar-global-note"
-          rows={3}
-          placeholder="Overall notes for this path (visible to the team)..."
-          value={globalNote}
-          onChange={e => setGlobalNote(e.target.value)}
-        />
-
-        <div className="ar-submit-row">
-          <button className="btn-ghost" onClick={onBack}>
-            <IconArrowLeft size={15} /> Cancel
-          </button>
-          <button className="btn-primary ar-submit-btn" onClick={handleSubmit}>
-            <IconCheck size={16} /> Submit Review
-          </button>
-        </div>
-      </div>
-
       <style>{`${sharedStyles}`}</style>
+
+      {/* ─── QUEUE VIEW (If no path is selected) ─── */}
+      {!selectedPath ? (
+        <div className="ar-queue-container">
+          <div className="ar-header">
+            <div>
+              <div className="pill pill-teal" style={{ marginBottom: 12 }}>Human in the Loop</div>
+              <h1 className="display-title" style={{ fontSize: 32 }}>Admin Review Curation</h1>
+              <p className="ar-header-sub">
+                Inspect AI-generated career paths, refine milestones, calibrate resources, and publish them to students.
+              </p>
+            </div>
+          </div>
+
+          {successMsg && (
+            <div className="ar-success-alert card">
+              <IconCheck size={20} />
+              <span>{successMsg}</span>
+            </div>
+          )}
+
+          {/* Filters Bar */}
+          <div className="ar-filters-bar card">
+            <div className="ar-search-input-wrapper">
+              <IconSearch size={16} />
+              <input
+                type="text"
+                placeholder="Search by student, goal, or location..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+            </div>
+            
+            <div className="ar-status-filters">
+              <button 
+                className={`filter-btn ${filterStatus === "under_admin_review" ? "active" : ""}`}
+                onClick={() => setFilterStatus("under_admin_review")}
+              >
+                Pending Review ({pathsQueue.filter(p => p.status === "under_admin_review").length})
+              </button>
+              <button 
+                className={`filter-btn ${filterStatus === "published" ? "active" : ""}`}
+                onClick={() => setFilterStatus("published")}
+              >
+                Published ({pathsQueue.filter(p => p.status === "published").length})
+              </button>
+            </div>
+          </div>
+
+          {/* Paths List */}
+          {loadingQueue ? (
+            <div className="ar-loading-state card">
+              <div className="dot-pulse"><span /><span /><span /></div>
+              <p>Loading database records...</p>
+            </div>
+          ) : error ? (
+            <div className="ar-error-card card">
+              <IconAlert size={28} />
+              <p>{error}</p>
+              <button className="btn-primary" onClick={loadQueue} style={{ marginTop: 12 }}>Retry Connection</button>
+            </div>
+          ) : filteredPaths.length === 0 ? (
+            <div className="ar-empty-state card">
+              <IconNavigation size={36} />
+              <h3>No career paths found</h3>
+              <p>Generate a career roadmap from the dashboard to populate the queue.</p>
+            </div>
+          ) : (
+            <div className="ar-queue-grid">
+              {filteredPaths.map(path => {
+                const dateStr = path.created_at ? new Date(path.created_at).toLocaleDateString("en-US", {
+                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                }) : "Just now";
+                
+                return (
+                  <div key={path.id} className="ar-queue-card card">
+                    <div className="ar-q-top">
+                      <div className="ar-q-student">
+                        <IconUser size={14} />
+                        <strong>{path.profile?.name || path.profile?.email || "Anonymous Student"}</strong>
+                        <span className="ar-q-date">{dateStr}</span>
+                      </div>
+                      <span className={`status-badge status-${path.status}`}>
+                        {path.status === "under_admin_review" ? "Pending Approval" : "Published"}
+                      </span>
+                    </div>
+
+                    <div className="ar-q-route">
+                      <div className="ar-q-point">
+                        <span className="q-dot green" />
+                        <span>{path.current_position}</span>
+                      </div>
+                      <div className="ar-q-spine" />
+                      <div className="ar-q-point">
+                        <span className="q-dot red" />
+                        <strong>{path.target_goal}</strong>
+                      </div>
+                    </div>
+
+                    <div className="ar-q-meta">
+                      <div className="meta-item"><span>Grade</span><strong>{path.profile?.grade || "N/A"}</strong></div>
+                      <div className="meta-item"><span>Board</span><strong>{path.profile?.curriculum || "N/A"}</strong></div>
+                      <div className="meta-item"><span>Readiness</span><strong className="green-text">{path.roadmap_data?.readiness_score}%</strong></div>
+                      <div className="meta-item"><span>Duration</span><strong>{path.roadmap_data?.total_duration}</strong></div>
+                    </div>
+
+                    <button className="ar-q-btn" onClick={() => selectPathForReview(path)}>
+                      {path.status === "published" ? "View Published Roadmap →" : "Audit & Curate Roadmap →"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ─── EDIT & CURATION VIEW ─── */
+        <div className="ar-editor-container">
+          <div className="ar-editor-header">
+            <button className="btn-back" onClick={() => setSelectedPath(null)}>
+              <IconArrowLeft size={16} /> Back to Curation Queue
+            </button>
+            <div className="editor-title-row">
+              <div>
+                <h1>{isReadOnly ? "Viewing Approved Roadmap for:" : "Curating Roadmap for:"} {selectedPath.profile?.name || "Student"}</h1>
+                <p>
+                  {isReadOnly 
+                    ? "This roadmap is fully approved and published. All fields are locked to read-only." 
+                    : "Edit AI milestones, refine execution steps, and select best-fit marketplace products before publishing."}
+                </p>
+              </div>
+              <div className="editor-status-badge">
+                <span className={`pill ${isReadOnly ? "pill-teal" : "pill-amber"}`}>
+                  {isReadOnly ? "Published (Read Only)" : "Under Review"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Stats Edit */}
+          <div className="ar-editor-stats-card card">
+            <h3>Global Metrics</h3>
+            {isReadOnly ? (
+              <div className="stats-read-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                <div className="stat-read-item" style={{ gridColumn: "span 3", borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 12 }}>
+                  <span>Pathway Title</span>
+                  <strong style={{ fontSize: 18 }}>{editedRoadmap.path_title || `Pathway to ${selectedPath.target_goal}`}</strong>
+                </div>
+                <div className="stat-read-item" style={{ gridColumn: "span 3", borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 12 }}>
+                  <span>Pathway Description</span>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text2)", lineHeight: 1.5, fontWeight: "normal" }}>
+                    {editedRoadmap.path_description || "No description provided."}
+                  </p>
+                </div>
+                <div className="stat-read-item">
+                  <span>Readiness Score</span>
+                  <strong className="green-text">{editedRoadmap.readiness_score}%</strong>
+                </div>
+                <div className="stat-read-item">
+                  <span>Readiness Label</span>
+                  <strong>{editedRoadmap.readiness_label}</strong>
+                </div>
+                <div className="stat-read-item">
+                  <span>Total Duration</span>
+                  <strong>{editedRoadmap.total_duration}</strong>
+                </div>
+              </div>
+            ) : (
+              <div className="stats-edit-grid" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div className="stats-edit-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <div className="stat-edit-field">
+                    <label>Pathway Title</label>
+                    <input 
+                      type="text" 
+                      style={{ width: "100%" }}
+                      placeholder="e.g. Academic Pathway to Oxford"
+                      value={editedRoadmap.path_title || ""} 
+                      onChange={e => handleGeneralChange("path_title", e.target.value)}
+                    />
+                  </div>
+                  <div className="stat-edit-field">
+                    <label>Pathway Description</label>
+                    <textarea 
+                      rows={2}
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid var(--border)", borderRadius: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
+                      placeholder="Provide a multi-sentence strategic description of this pathway..."
+                      value={editedRoadmap.path_description || ""} 
+                      onChange={e => handleGeneralChange("path_description", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="stats-edit-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                  <div className="stat-edit-field">
+                    <label>Readiness Score (0-100)</label>
+                    <input 
+                      type="number" 
+                      value={editedRoadmap.readiness_score || 0} 
+                      onChange={e => handleGeneralChange("readiness_score", parseInt(e.target.value) || 0)}
+                      min="0" max="100"
+                    />
+                  </div>
+                  <div className="stat-edit-field">
+                    <label>Readiness Label</label>
+                    <input 
+                      type="text" 
+                      value={editedRoadmap.readiness_label || ""} 
+                      onChange={e => handleGeneralChange("readiness_label", e.target.value)}
+                    />
+                  </div>
+                  <div className="stat-edit-field">
+                    <label>Total Duration</label>
+                    <input 
+                      type="text" 
+                      value={editedRoadmap.total_duration || ""} 
+                      onChange={e => handleGeneralChange("total_duration", e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Milestones Editor List */}
+          <div className="ar-milestones-editor-list">
+            <div className="section-label">Milestones & Resources</div>
+            
+            {editedRoadmap.macro_path?.map((milestone, mIdx) => (
+              <div key={milestone.id} className="ar-editor-milestone-card card">
+                <div className="m-header">
+                  <div className="m-number">{milestone.id}</div>
+                  
+                  {isReadOnly ? (
+                    <div className="m-title-view">
+                      <div className="m-title-row-view">
+                        <h2>{milestone.title}</h2>
+                        <span className="m-dur-badge">{milestone.duration}</span>
+                      </div>
+                      <p className="m-desc-text">{milestone.description}</p>
+                    </div>
+                  ) : (
+                    <div className="m-title-fields">
+                      <div className="m-title-input-row">
+                        <input 
+                          type="text" 
+                          className="m-title-input"
+                          placeholder="Milestone Title"
+                          value={milestone.title} 
+                          onChange={e => handleMilestoneChange(mIdx, "title", e.target.value)}
+                        />
+                        <input 
+                          type="text" 
+                          className="m-duration-input" 
+                          placeholder="e.g. Months 1-3"
+                          value={milestone.duration}
+                          onChange={e => handleMilestoneChange(mIdx, "duration", e.target.value)}
+                        />
+                      </div>
+                      <textarea 
+                        className="m-desc-input"
+                        placeholder="High-level milestone description..."
+                        rows={2}
+                        value={milestone.description}
+                        onChange={e => handleMilestoneChange(mIdx, "description", e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Triple Views Curation */}
+                <div className="editor-views-grid">
+                  {[
+                    { key: "macro_view", label: "Macro View (High Level Outcome)", colorClass: "macro" },
+                    { key: "micro_view", label: "Micro View (Execution Output)", colorClass: "micro" },
+                    { key: "nano_view", label: "Nano View (Mentor Guidance focus)", colorClass: "nano" }
+                  ].map(v => (
+                    <div key={v.key} className={`view-edit-box ${v.colorClass}`}>
+                      <span className="view-lbl">{v.label}</span>
+                      {isReadOnly ? (
+                        <p className="view-read-text">{milestone[v.key] || "No description provided."}</p>
+                      ) : (
+                        <textarea 
+                          value={milestone[v.key] || ""} 
+                          onChange={e => handleMilestoneChange(mIdx, v.key, e.target.value)}
+                          rows={2}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Micro Steps (Tasks) */}
+                <div className="editor-steps-section">
+                  <div className="section-sublabel">Micro Tasks (Exactly 3)</div>
+                  
+                  {isReadOnly ? (
+                    <div className="steps-read-list">
+                      {milestone.micro_steps?.map((step, sIdx) => (
+                        <div key={sIdx} className="step-read-row">
+                          <span className="step-read-num">{sIdx + 1}</span>
+                          <span className="step-read-task">{step.task}</span>
+                          <span className="step-read-res-badge">{step.resource}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="steps-edit-list">
+                      {milestone.micro_steps?.map((step, sIdx) => (
+                        <div key={sIdx} className="step-edit-row">
+                          <div className="step-num">{sIdx + 1}</div>
+                          <input 
+                            type="text" 
+                            placeholder="Specific action item..."
+                            value={step.task} 
+                            onChange={e => handleMicroStepChange(mIdx, sIdx, "task", e.target.value)}
+                            className="task-input"
+                          />
+                          <input 
+                            type="text" 
+                            placeholder="Recommended resource..."
+                            value={step.resource} 
+                            onChange={e => handleMicroStepChange(mIdx, sIdx, "resource", e.target.value)}
+                            className="resource-input"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Marketplace Resources */}
+                <div className="editor-marketplace-section">
+                  <div className="section-sublabel">Marketplace calibration</div>
+                  
+                  {/* Macro Free */}
+                  <div className="market-group">
+                    <div className="market-group-title free">Free Content / Community Resources</div>
+                    <div className="market-items-grid">
+                      {milestone.marketplace?.macro_free?.map((res, rIdx) => (
+                        <div key={rIdx} className="market-card-wrapper">
+                          {isReadOnly ? (
+                            <div className="market-read-card card-free">
+                              <strong>{res.name}</strong>
+                              <div className="res-read-meta">
+                                <span className="m-chip free">{res.type}</span>
+                              </div>
+                              <p className="res-why">{res.why}</p>
+                              {res.next_step && <div className="res-read-next">Action: <strong>{res.next_step}</strong></div>}
+                            </div>
+                          ) : (
+                            <div className="market-edit-card">
+                              <input 
+                                type="text" 
+                                className="res-name" 
+                                placeholder="Resource Name"
+                                value={res.name}
+                                onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "name", e.target.value)}
+                              />
+                              <div className="res-row-2">
+                                <input 
+                                  type="text" 
+                                  placeholder="Type"
+                                  value={res.type}
+                                  onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "type", e.target.value)}
+                                />
+                                <input 
+                                  type="text" 
+                                  placeholder="Next Step"
+                                  value={res.next_step}
+                                  onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "next_step", e.target.value)}
+                                />
+                              </div>
+                              <textarea 
+                                placeholder="Value proposition statement..."
+                                value={res.why}
+                                onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "why", e.target.value)}
+                                rows={2}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Micro Structured */}
+                  <div className="market-group">
+                    <div className="market-group-title structured">Structured / Paid Certifications</div>
+                    <div className="market-items-grid">
+                      {milestone.marketplace?.micro_structured?.map((res, rIdx) => (
+                        <div key={rIdx} className="market-card-wrapper">
+                          {isReadOnly ? (
+                            <div className="market-read-card card-structured">
+                              <strong>{res.name}</strong>
+                              <div className="res-read-meta">
+                                <span className="m-chip structured">{res.type}</span>
+                                <span className="m-cost">{res.cost}</span>
+                                <span className="m-dur">{res.duration}</span>
+                              </div>
+                              <p className="res-why">{res.value}</p>
+                              {res.next_step && <div className="res-read-next">Action: <strong>{res.next_step}</strong></div>}
+                            </div>
+                          ) : (
+                            <div className="market-edit-card">
+                              <input 
+                                type="text" 
+                                className="res-name" 
+                                placeholder="Course/Bootcamp Name"
+                                value={res.name}
+                                onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "name", e.target.value)}
+                              />
+                              <div className="res-row-3">
+                                <input 
+                                  type="text" 
+                                  placeholder="Cost"
+                                  value={res.cost}
+                                  onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "cost", e.target.value)}
+                                />
+                                <input 
+                                  type="text" 
+                                  placeholder="Duration"
+                                  value={res.duration}
+                                  onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "duration", e.target.value)}
+                                />
+                                <input 
+                                  type="text" 
+                                  placeholder="Next step"
+                                  value={res.next_step}
+                                  onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "next_step", e.target.value)}
+                                />
+                              </div>
+                              <textarea 
+                                placeholder="Value proposition statement..."
+                                value={res.value}
+                                onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "value", e.target.value)}
+                                rows={2}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Nano Expert */}
+                  <div className="market-group">
+                    <div className="market-group-title expert">Expert Mentors & Personal Counselors</div>
+                    <div className="market-items-grid">
+                      {milestone.marketplace?.nano_expert?.map((res, rIdx) => (
+                        <div key={rIdx} className="market-card-wrapper">
+                          {isReadOnly ? (
+                            <div className="market-read-card card-expert">
+                              <strong>{res.name}</strong>
+                              <div className="res-read-meta">
+                                <span className="m-chip expert">{res.type}</span>
+                                <span className="m-cost">{res.price}</span>
+                              </div>
+                              <p className="res-why">{res.expected_outcomes}</p>
+                              {res.session_details && <div className="res-read-next">Format: <strong>{res.session_details}</strong></div>}
+                            </div>
+                          ) : (
+                            <div className="market-edit-card">
+                              <input 
+                                type="text" 
+                                className="res-name" 
+                                placeholder="Mentor or Service Name"
+                                value={res.name}
+                                onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "name", e.target.value)}
+                              />
+                              <div className="res-row-2">
+                                <input 
+                                  type="text" 
+                                  placeholder="Price"
+                                  value={res.price}
+                                  onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "price", e.target.value)}
+                                />
+                                <input 
+                                  type="text" 
+                                  placeholder="Details"
+                                  value={res.session_details}
+                                  onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "session_details", e.target.value)}
+                                />
+                              </div>
+                              <textarea 
+                                placeholder="Expected Mentorship outcomes..."
+                                value={res.expected_outcomes}
+                                onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "expected_outcomes", e.target.value)}
+                                rows={2}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Action Row */}
+          <div className="editor-action-card card">
+            {isReadOnly ? (
+              <div className="editor-submit-box">
+                <h3>Published & Locked</h3>
+                <p>This study roadmap has been approved and published to the student portal. To return to your review queue, click below.</p>
+                <div className="editor-submit-btns">
+                  <button className="btn-primary" onClick={() => setSelectedPath(null)}>
+                    ← Close Details & Return
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="editor-submit-box">
+                <h3>Approve Curation</h3>
+                <p>Publishing saves the curated milestones and marks this path as officially published. It will unlock immediately in the student's dashboard.</p>
+                
+                <div className="editor-submit-btns">
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => setSelectedPath(null)}
+                    disabled={loadingSubmit}
+                  >
+                    Discard Changes
+                  </button>
+                  <button 
+                    className="btn-primary approve-btn" 
+                    onClick={() => submitReview(STATUS.published)}
+                    disabled={loadingSubmit}
+                  >
+                    {loadingSubmit ? "Publishing..." : "Approve & Publish Roadmap"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
     </div>
   );
 }
 
 const sharedStyles = `
-  .ar-page { max-width: 900px; }
-
-  .ar-header {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    gap: 24px; flex-wrap: wrap; margin-bottom: 24px;
+  .ar-page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 24px 20px 80px;
   }
-  .ar-header-sub { font-size: 14px; color: var(--text2); margin-top: 8px; line-height: 1.6; max-width: 500px; }
-  .ar-header-stats { display: flex; gap: 10px; flex-shrink: 0; }
-  .ar-stat-card {
-    display: flex; flex-direction: column; align-items: center;
-    padding: 12px 18px; border-radius: 12px; min-width: 72px;
+
+  /* QUEUE VIEW */
+  .ar-queue-container {
+    animation: fadeUp 0.3s ease both;
+  }
+  .ar-header {
+    margin-bottom: 28px;
+  }
+  .ar-header-sub {
+    font-size: 14px;
+    color: var(--text2);
+    margin-top: 6px;
+    line-height: 1.6;
+    max-width: 600px;
+  }
+
+  .ar-filters-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 20px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .ar-search-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 14px;
+    flex: 1;
+    min-width: 260px;
+  }
+  .ar-search-input-wrapper input {
+    border: none;
+    background: none;
+    outline: none;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--text);
+    width: 100%;
+  }
+  .ar-search-input-wrapper svg {
+    color: var(--text3);
+  }
+
+  .ar-status-filters {
+    display: flex;
+    gap: 8px;
+  }
+  .filter-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .filter-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .filter-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  /* Queue Cards */
+  .ar-queue-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+  }
+  .ar-queue-card {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border-left: 4px solid var(--border);
+  }
+  .ar-queue-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(32,33,36,0.06);
+  }
+  .ar-queue-card.card {
+    border-left: 4px solid var(--accent);
+  }
+  
+  .ar-q-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .ar-q-student {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text2);
+  }
+  .ar-q-student strong {
+    color: var(--text);
+  }
+  .ar-q-date {
+    font-size: 11px;
+    color: var(--text3);
+  }
+  
+  .status-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    text-transform: uppercase;
+  }
+  .status-under_admin_review {
+    background: var(--yellow-soft);
+    color: #8A6000;
+  }
+  .status-published {
+    background: var(--green-soft);
+    color: var(--green);
+  }
+
+  .ar-q-route {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border-radius: 10px;
     border: 1px solid var(--border);
   }
-  .ar-stat-val { font-family: var(--font-display); font-size: 26px; line-height: 1; }
-  .ar-stat-lbl { font-size: 11px; color: var(--text3); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .ar-stat-green { background: var(--green-soft); }
-  .ar-stat-green .ar-stat-val { color: var(--green); }
-  .ar-stat-red   { background: var(--red-soft); }
-  .ar-stat-red .ar-stat-val   { color: var(--red); }
-  .ar-stat-gray  { background: var(--bg3); }
-  .ar-stat-gray .ar-stat-val  { color: var(--text2); }
-
-  .ar-route-card { padding: 18px 22px; margin-bottom: 24px; }
-  .ar-route-row  { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .ar-route-point{ display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 140px; }
-  .ar-route-dot  { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
-  .ar-route-dot.green { background: var(--green); }
-  .ar-route-dot.red   { background: var(--red); }
-  .ar-route-label{ font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 700; }
-  .ar-route-val  { font-size: 13px; font-weight: 600; color: var(--text); margin-top: 2px; }
-  .ar-route-arrow{ font-size: 20px; color: var(--text3); flex-shrink: 0; }
-  .ar-route-meta { display: flex; gap: 8px; flex-wrap: wrap; }
-
-  .ar-steps-section { margin-bottom: 28px; }
-
-  .ar-step-card  { padding: 20px; margin-bottom: 14px; border-left: 4px solid var(--border); transition: all 0.2s; }
-  .ar-step-approved { border-left-color: var(--green); background: linear-gradient(135deg, rgba(52,168,83,0.04), #fff); }
-  .ar-step-rejected { border-left-color: var(--red);   background: linear-gradient(135deg, rgba(232,49,42,0.04), #fff); }
-  .ar-step-pending  { border-left-color: var(--border); }
-
-  .ar-step-top {
-    display: flex; align-items: flex-start; gap: 14px; margin-bottom: 10px; flex-wrap: wrap;
+  .ar-q-point {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text);
   }
-  .ar-step-num {
-    width: 30px; height: 30px; border-radius: 50%;
-    background: var(--bg3); color: var(--text2);
-    font-size: 13px; font-weight: 700;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  .q-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
-  .ar-step-info  { flex: 1; }
-  .ar-step-title { font-size: 15px; font-weight: 600; color: var(--text); }
-  .ar-step-dur   { font-size: 12px; color: var(--text3); margin-top: 2px; }
-  .ar-step-desc  { font-size: 13px; color: var(--text2); line-height: 1.6; margin-bottom: 12px; }
-
-  .ar-step-actions { display: flex; gap: 8px; flex-shrink: 0; }
-  .ar-action-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 14px; border-radius: 8px;
-    font-family: var(--font-body); font-size: 12px; font-weight: 600;
-    cursor: pointer; border: 1.5px solid var(--border);
-    background: #fff; color: var(--text2); transition: all 0.18s;
+  .q-dot.green { background: var(--green); }
+  .q-dot.red { background: var(--red); }
+  .ar-q-spine {
+    width: 1px;
+    height: 8px;
+    border-left: 1.5px dashed var(--border);
+    margin-left: 3px;
   }
-  .ar-approve:hover, .ar-approve.active { background: var(--green-soft); border-color: var(--green); color: var(--green); }
-  .ar-reject:hover,  .ar-reject.active  { background: var(--red-soft);   border-color: var(--red);   color: var(--red); }
 
-  .ar-views-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 12px; }
-  .ar-view-chip { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); }
-  .ar-view-chip span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-  .ar-view-chip p    { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
-  .ar-view-macro { background: var(--green-soft); }
-  .ar-view-macro span { color: var(--accent2); }
-  .ar-view-micro { background: var(--blue-soft); }
-  .ar-view-micro span { color: var(--blue); }
-  .ar-view-nano  { background: var(--red-soft); }
-  .ar-view-nano span  { color: var(--red); }
+  .ar-q-meta {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    font-size: 12px;
+  }
+  .meta-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--bg3);
+    border-radius: 6px;
+  }
+  .meta-item span {
+    color: var(--text3);
+  }
+  .meta-item strong {
+    color: var(--text);
+  }
+  .green-text {
+    color: var(--green) !important;
+  }
 
-  .ar-note-row { margin-top: 8px; }
-  .ar-note-input {
-    width: 100%; padding: 9px 12px;
-    border: 1px solid var(--border); border-radius: 8px;
-    background: var(--bg); color: var(--text);
-    font-family: var(--font-body); font-size: 13px; outline: none;
+  .ar-q-btn {
+    width: 100%;
+    padding: 11px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-top: 4px;
+  }
+  .ar-q-btn:hover {
+    background: var(--accent2);
+  }
+
+  /* EDITOR VIEW */
+  .ar-editor-container {
+    animation: fadeIn 0.3s ease both;
+  }
+  .ar-editor-header {
+    margin-bottom: 24px;
+  }
+  .btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 12px;
+    padding: 0;
+  }
+  .btn-back:hover {
+    text-decoration: underline;
+  }
+  .editor-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .editor-title-row h1 {
+    font-family: var(--font-display);
+    font-size: 26px;
+    color: var(--text);
+  }
+  .editor-title-row p {
+    font-size: 14px;
+    color: var(--text2);
+    margin-top: 4px;
+  }
+
+  .ar-editor-stats-card {
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  }
+  .ar-editor-stats-card h3 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text3);
+    margin-bottom: 12px;
+  }
+  .stats-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .stat-edit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-edit-field label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+  }
+  .stat-edit-field input {
+    padding: 9px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    outline: none;
     transition: border-color 0.2s;
   }
-  .ar-note-input:focus { border-color: var(--blue); }
-  .ar-note-input::placeholder { color: var(--text3); }
+  .stat-edit-field input:focus {
+    border-color: var(--accent);
+  }
 
-  .ar-decision-card { padding: 24px; }
-  .ar-decision-btns { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0 18px; }
-  .ar-decision-btn {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 10px 20px; border-radius: 10px;
-    font-family: var(--font-body); font-size: 14px; font-weight: 600;
-    cursor: pointer; border: 1.5px solid var(--border);
-    background: #fff; color: var(--text2); transition: all 0.2s; flex: 1;
+  /* READ ONLY METRICS VIEW */
+  .stats-read-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .stat-read-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .stat-read-item span {
+    font-size: 11px;
+    color: var(--text3);
+    font-weight: 500;
+  }
+  .stat-read-item strong {
+    font-size: 15px;
+    color: var(--text);
+  }
+
+  /* Milestone Card Curation */
+  .ar-editor-milestone-card {
+    padding: 24px;
+    margin-bottom: 20px;
+    border-left: 4px solid var(--accent);
+  }
+  .m-header {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .m-number {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .m-title-fields {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .m-title-input-row {
+    display: flex;
+    gap: 12px;
+  }
+  .m-title-input {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    padding: 6px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+  }
+  .m-title-input:focus { border-color: var(--accent); }
+  .m-duration-input {
+    width: 130px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent2);
+    padding: 6px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    outline: none;
+    text-align: center;
+  }
+  .m-duration-input:focus { border-color: var(--accent); }
+  .m-desc-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    line-height: 1.6;
+    outline: none;
+    resize: vertical;
+  }
+  .m-desc-input:focus { border-color: var(--accent); }
+
+  /* Read Only Milestone View */
+  .m-title-view {
+    flex: 1;
+  }
+  .m-title-row-view {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  .m-title-row-view h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .m-dur-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent2);
+    background: var(--accent-soft);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .m-desc-text {
+    font-size: 13.5px;
+    color: var(--text2);
+    line-height: 1.6;
+  }
+
+  /* Views Edit Grid */
+  .editor-views-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 14px;
+    background: var(--bg);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+  }
+  .view-edit-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .view-lbl {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .macro .view-lbl { color: var(--green); }
+  .micro .view-lbl { color: var(--blue); }
+  .nano .view-lbl  { color: var(--red); }
+  
+  .view-edit-box textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 12px;
+    line-height: 1.5;
+    outline: none;
+    resize: none;
+    background: #fff;
+  }
+  .view-edit-box textarea:focus {
+    border-color: var(--accent);
+  }
+  .view-read-text {
+    font-size: 12.5px;
+    color: var(--text2);
+    line-height: 1.55;
+    background: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  /* Actionable micro steps */
+  .editor-steps-section {
+    margin-bottom: 22px;
+    padding: 14px 18px;
+    background: #fff;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+  }
+  .section-sublabel {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text3);
+    margin-bottom: 12px;
+  }
+  .steps-edit-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .step-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .step-edit-row .step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg3);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-edit-row .task-input {
+    flex: 2;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+  }
+  .step-edit-row .resource-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    outline: none;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .step-edit-row input:focus {
+    border-color: var(--accent);
+  }
+
+  /* Read-Only steps */
+  .steps-read-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .step-read-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--bg3);
+  }
+  .step-read-row:last-child {
+    border-bottom: none;
+  }
+  .step-read-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent2);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
     justify-content: center;
   }
-  .ar-decision-approved:hover, .ar-decision-approved.active { background: var(--green-soft); border-color: var(--green); color: var(--green); }
-  .ar-decision-rejected:hover, .ar-decision-rejected.active { background: var(--red-soft);   border-color: var(--red);   color: var(--red); }
-  .ar-decision-pending:hover,  .ar-decision-pending.active  { background: var(--yellow-soft); border-color: var(--yellow); color: #8A6000; }
-
-  .ar-global-note {
-    width: 100%; padding: 12px 14px;
-    border: 1.5px solid var(--border); border-radius: 10px;
-    background: var(--bg); color: var(--text);
-    font-family: var(--font-body); font-size: 14px; resize: none; outline: none;
-    transition: border-color 0.2s;
-  }
-  .ar-global-note:focus { border-color: var(--blue); }
-
-  .ar-submit-row {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-top: 18px; flex-wrap: wrap; gap: 12px;
-  }
-  .ar-submit-btn { padding: 12px 28px; font-size: 15px; }
-
-  /* Success screen */
-  .ar-success {
-    display: flex; flex-direction: column; align-items: center;
-    text-align: center; padding: 48px 36px; gap: 16px; max-width: 520px; margin: 40px auto;
-  }
-  .ar-success-icon {
-    width: 64px; height: 64px; border-radius: 50%;
-    background: var(--green-soft); color: var(--green);
-    display: flex; align-items: center; justify-content: center;
-  }
-  .ar-success-title { font-family: var(--font-display); font-size: 26px; color: var(--text); }
-  .ar-success-sub   { font-size: 14px; color: var(--text2); line-height: 1.7; }
-  .ar-success-meta  { width: 100%; display: flex; flex-direction: column; gap: 10px; }
-  .ar-meta-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; background: var(--bg); border-radius: 8px; border: 1px solid var(--border);
+  .step-read-task {
+    flex: 1;
     font-size: 13px;
+    color: var(--text);
+    font-weight: 500;
   }
-  .ar-meta-row span   { color: var(--text3); }
-  .ar-meta-row strong { color: var(--text); }
-  .ar-status-badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; }
-  .ar-status-approved { background: var(--green-soft); color: var(--green); }
-  .ar-status-rejected { background: var(--red-soft);   color: var(--red); }
-  .ar-status-pending  { background: var(--yellow-soft); color: #8A6000; }
-  .ar-note-preview { width: 100%; background: var(--bg3); border-radius: 10px; padding: 14px; text-align: left; }
-  .ar-note-preview-label { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; margin-bottom: 6px; }
-  .ar-note-preview p { font-size: 13px; color: var(--text2); line-height: 1.6; }
+  .step-read-res-badge {
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--bg3);
+    color: var(--text2);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
 
-  .ar-empty {
-    display: flex; align-items: center; gap: 16px; padding: 36px;
-    color: var(--text2); max-width: 500px; margin: 40px auto;
+  /* Marketplace resources */
+  .editor-marketplace-section {
+    padding: 16px 18px;
+    background: var(--bg3);
+    border-radius: 12px;
+    border: 1px solid var(--border);
   }
-  .ar-empty svg { color: var(--amber); flex-shrink: 0; }
-  .ar-empty h3  { margin-bottom: 4px; color: var(--text); font-size: 18px; }
-  .ar-empty p   { font-size: 14px; color: var(--text2); margin-bottom: 12px; }
+  .market-group {
+    margin-bottom: 20px;
+  }
+  .market-group:last-child {
+    margin-bottom: 0;
+  }
+  .market-group-title {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    padding-bottom: 4px;
+    border-bottom: 2px solid;
+  }
+  .market-group-title.free { color: var(--green); border-color: rgba(52,168,83,0.15); }
+  .market-group-title.structured { color: var(--blue); border-color: rgba(66,133,244,0.15); }
+  .market-group-title.expert { color: var(--red); border-color: rgba(232,49,42,0.15); }
+
+  .market-items-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+  }
+  .market-edit-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .market-edit-card .res-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text);
+    border: none;
+    border-bottom: 1.5px solid var(--border);
+    outline: none;
+    padding-bottom: 4px;
+  }
+  .market-edit-card .res-name:focus {
+    border-color: var(--accent);
+  }
+  .res-row-2, .res-row-3 {
+    display: flex;
+    gap: 6px;
+  }
+  .market-edit-card input:not(.res-name) {
+    padding: 5px 8px;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    outline: none;
+    flex: 1;
+  }
+  .market-edit-card input:not(.res-name):focus {
+    border-color: var(--accent);
+  }
+  .market-edit-card textarea {
+    padding: 6px 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    outline: none;
+    resize: none;
+  }
+  .market-edit-card textarea:focus {
+    border-color: var(--accent);
+  }
+
+  /* Read-Only Marketplace Cards */
+  .market-read-card {
+    background: #fff;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100%;
+    transition: transform 0.2s;
+  }
+  .market-read-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+  }
+  .market-read-card.card-free { border-top: 3px solid var(--green); }
+  .market-read-card.card-structured { border-top: 3px solid var(--blue); }
+  .market-read-card.card-expert { border-top: 3px solid var(--red); }
+  
+  .market-read-card strong {
+    font-size: 13.5px;
+    color: var(--text);
+  }
+  .res-read-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .m-chip {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .m-chip.free { background: var(--green-soft); color: var(--green); }
+  .m-chip.structured { background: var(--blue-soft); color: var(--blue); }
+  .m-chip.expert { background: var(--red-soft); color: var(--red); }
+  
+  .m-cost, .m-dur {
+    font-size: 11px;
+    color: var(--text3);
+    font-weight: 600;
+  }
+  .m-cost::before { content: "• "; }
+  .m-dur::before { content: "• "; }
+  
+  .res-why {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.5;
+    margin: 4px 0;
+  }
+  .res-read-next {
+    font-size: 11.5px;
+    color: var(--text2);
+    background: var(--bg);
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin-top: auto;
+  }
+
+  /* Submit Action section */
+  .editor-action-card {
+    padding: 24px;
+    margin-top: 24px;
+  }
+  .editor-submit-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .editor-submit-box h3 {
+    font-family: var(--font-display);
+    font-size: 18px;
+    color: var(--text);
+  }
+  .editor-submit-box p {
+    font-size: 13px;
+    color: var(--text3);
+    line-height: 1.5;
+  }
+  .editor-submit-btns {
+    display: flex;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .editor-submit-btns button {
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: all 0.2s;
+  }
+  .btn-secondary {
+    background: none;
+    border: 1.5px solid var(--border);
+    color: var(--text2);
+  }
+  .btn-secondary:hover {
+    border-color: var(--text);
+    color: var(--text);
+  }
+  .approve-btn {
+    background: var(--green);
+    color: #fff;
+    border: none;
+    box-shadow: 0 4px 14px rgba(52,168,83,0.3);
+  }
+  .approve-btn:hover {
+    background: #2b9045;
+  }
+
+  /* ALERTS & STATES */
+  .ar-loading-state {
+    padding: 40px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    color: var(--text3);
+  }
+  .ar-error-card {
+    padding: 30px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    color: var(--red);
+    gap: 8px;
+  }
+  .ar-success-alert {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: var(--green-soft);
+    border-left: 4px solid var(--green);
+    color: var(--accent2);
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    animation: fadeIn 0.2s ease both;
+  }
+
+  .ar-empty-state {
+    padding: 48px;
+    text-align: center;
+    color: var(--text3);
+  }
+  .ar-empty-state svg {
+    color: var(--border);
+    margin-bottom: 12px;
+  }
+  .ar-empty-state h3 {
+    color: var(--text);
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 `;
