@@ -6,7 +6,7 @@ import {
   IconRoute, IconBuilding
 } from "./Icons";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 const STATUS = {
   under_review: "under_admin_review",

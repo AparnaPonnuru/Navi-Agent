@@ -4,7 +4,7 @@ import {
   IconArrowRight, IconBrain, IconNavigation, IconRoute, IconCheck,
 } from "./Icons";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 const LOADING_MSGS = [
   "Analyzing your profile...",
