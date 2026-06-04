@@ -255,7 +255,7 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
           <div className="ar-header">
             <div>
               <div className="pill pill-teal" style={{ marginBottom: 12 }}>Human in the Loop</div>
-              <h1 className="display-title" style={{ fontSize: 32 }}>Admin Review Curation</h1>
+              <h1 className="display-title" style={{ fontSize: 27 }}>Admin Review Curation</h1>
               <p className="ar-header-sub">
                 Inspect AI-generated career paths, refine milestones, calibrate resources, and publish them to students.
               </p>
