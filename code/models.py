@@ -93,6 +93,7 @@ class PendingPathModel(BaseModel):
     profile: Optional[Dict[str, Any]] = None
     roadmap_data: RoadmapData
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_by: Optional[str] = Field(default=None, alias="createdBy")
 
     class Config:
         populate_by_name = True
@@ -111,6 +112,7 @@ class PublishedPathModel(BaseModel):
     roadmap_data: RoadmapData
     published_at: datetime = Field(default_factory=datetime.utcnow)
     created_at: datetime
+    created_by: Optional[str] = Field(default=None, alias="createdBy")
 
     class Config:
         populate_by_name = True

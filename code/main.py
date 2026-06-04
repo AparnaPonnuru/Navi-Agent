@@ -93,6 +93,30 @@ def serialize_mongo_doc(doc):
                     profile_dict[field] = val
     return doc
 
+async def enrich_path_profile(doc):
+    if not doc:
+        return doc
+    email = None
+    if "profile" in doc and doc["profile"] and "email" in doc["profile"]:
+        email = doc["profile"]["email"]
+    if not email and "created_by" in doc and doc["created_by"]:
+        email = doc["created_by"]
+    if not email and "createdBy" in doc and doc["createdBy"]:
+        email = doc["createdBy"]
+        
+    if email:
+        profile_doc = await profiles_collection.find_one({"email": email.lower()})
+        if profile_doc:
+            doc["profile"] = serialize_mongo_doc(profile_doc)
+            doc["created_by"] = email.lower()
+            doc["createdBy"] = email.lower()
+            
+    if "profile" not in doc or not doc["profile"]:
+        doc["profile"] = {"email": email or "", "name": "Anonymous Student"}
+        
+    return doc
+
+
 # ─── AGENT 1: BLUEPRINT GENERATOR PROMPT ──────────────────────────────────
 AGENT_1_PROMPT = """You are the Naaviverse career blueprint generator (Agent 1).
 Your task is to draft the initial raw career roadmap based on:
@@ -778,6 +802,7 @@ async def build_and_store_final_path(
         final_json = recursive_sanitize(final_json, name_tokens)
         print("[Sanitizer] Personal name sanitization complete.")
 
+    email = profile.get("email") if profile else None
     path_doc = {
         "query": f"Current: {current}. Goal: {goal}.",
         "current_position": current,
@@ -785,7 +810,9 @@ async def build_and_store_final_path(
         "profile": profile,
         "roadmap_data": final_json,
         "status": "under_admin_review",
-        "created_at": datetime.datetime.utcnow()
+        "created_at": datetime.datetime.now(datetime.timezone.utc),
+        "created_by": email,
+        "createdBy": email
     }
 
     insert_result = await pending_paths_collection.insert_one(path_doc)
@@ -793,6 +820,7 @@ async def build_and_store_final_path(
     final_json["status"] = "under_admin_review"
     print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
     return final_json
+
 
 # ─── API ENDPOINTS ────────────────────────────────────────────────────────
 
@@ -807,7 +835,7 @@ async def save_profile(profile: StudentProfileModel):
     if "id" in profile_dict:
         del profile_dict["id"]
         
-    profile_dict["updated_at"] = datetime.datetime.utcnow()
+    profile_dict["updated_at"] = datetime.datetime.now(datetime.timezone.utc)
     
     if existing:
         await profiles_collection.update_one(
@@ -817,7 +845,7 @@ async def save_profile(profile: StudentProfileModel):
         updated_doc = await profiles_collection.find_one({"email": profile.email.lower()})
         return serialize_mongo_doc(updated_doc)
     else:
-        profile_dict["created_at"] = datetime.datetime.utcnow()
+        profile_dict["created_at"] = datetime.datetime.now(datetime.timezone.utc)
         result = await profiles_collection.insert_one(profile_dict)
         profile_dict["id"] = str(result.inserted_id)
         return serialize_mongo_doc(profile_dict)
@@ -1010,6 +1038,7 @@ async def generate_path(req: PathGenerationRequest):
             final_json = recursive_sanitize(final_json, name_tokens)
             print("[Sanitizer] Personal name sanitization complete.")
         
+        email = profile.get("email") if profile else None
         # Step 4: Persist to MongoDB with 'under_admin_review' status
         path_doc = {
             "query": f"Current: {current}. Goal: {goal}.",
@@ -1018,7 +1047,9 @@ async def generate_path(req: PathGenerationRequest):
             "profile": profile,
             "roadmap_data": final_json,
             "status": "under_admin_review",
-            "created_at": datetime.datetime.utcnow()
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
+            "created_by": email,
+            "createdBy": email
         }
         
         insert_result = await pending_paths_collection.insert_one(path_doc)
@@ -1037,6 +1068,7 @@ async def generate_path(req: PathGenerationRequest):
         
         # Try to persist fallback to MongoDB
         try:
+            email = profile.get("email") if profile else None
             path_doc = {
                 "query": f"Current: {current}. Goal: {goal}.",
                 "current_position": current,
@@ -1044,7 +1076,9 @@ async def generate_path(req: PathGenerationRequest):
                 "profile": profile,
                 "roadmap_data": final_json,
                 "status": "under_admin_review",
-                "created_at": datetime.datetime.utcnow()
+                "created_at": datetime.datetime.now(datetime.timezone.utc),
+                "created_by": email,
+                "createdBy": email
             }
             insert_result = await pending_paths_collection.insert_one(path_doc)
             final_json["db_id"] = str(insert_result.inserted_id)
@@ -1154,6 +1188,7 @@ async def generate_path_audit(req: PathAuditRequest):
             final_json = recursive_sanitize(final_json, name_tokens)
             print("[Sanitizer] Personal name sanitization complete.")
         
+        email = profile.get("email") if profile else None
         # Persist to MongoDB with 'under_admin_review' status
         path_doc = {
             "query": f"Current: {current}. Goal: {goal}.",
@@ -1162,7 +1197,9 @@ async def generate_path_audit(req: PathAuditRequest):
             "profile": profile,
             "roadmap_data": final_json,
             "status": "under_admin_review",
-            "created_at": datetime.datetime.utcnow()
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
+            "created_by": email,
+            "createdBy": email
         }
         
         insert_result = await pending_paths_collection.insert_one(path_doc)
@@ -1182,6 +1219,7 @@ async def generate_path_audit(req: PathAuditRequest):
             final_json = recursive_sanitize(final_json, name_tokens)
         
         try:
+            email = profile.get("email") if profile else None
             path_doc = {
                 "query": f"Current: {current}. Goal: {goal}.",
                 "current_position": current,
@@ -1189,7 +1227,9 @@ async def generate_path_audit(req: PathAuditRequest):
                 "profile": profile,
                 "roadmap_data": final_json,
                 "status": "under_admin_review",
-                "created_at": datetime.datetime.utcnow()
+                "created_at": datetime.datetime.now(datetime.timezone.utc),
+                "created_by": email,
+                "createdBy": email
             }
             insert_result = await pending_paths_collection.insert_one(path_doc)
             final_json["db_id"] = str(insert_result.inserted_id)
@@ -1225,14 +1265,18 @@ async def get_admin_paths(status: Optional[str] = "under_admin_review"):
         cursor = pending_paths_collection.find({}).sort("created_at", -1)
         async for doc in cursor:
             doc["status"] = "under_admin_review"
-            paths.append(serialize_mongo_doc(doc))
+            serialized = serialize_mongo_doc(doc)
+            enriched = await enrich_path_profile(serialized)
+            paths.append(enriched)
             
     # If status is "published" or "all":
     if status == "published" or status == "all":
         cursor = published_paths_collection.find({}).sort("created_at", -1)
         async for doc in cursor:
             doc["status"] = "published"
-            paths.append(serialize_mongo_doc(doc))
+            serialized = serialize_mongo_doc(doc)
+            enriched = await enrich_path_profile(serialized)
+            paths.append(enriched)
             
     # Sort them combined by created_at desc if status was "all"
     if status == "all":
@@ -1251,12 +1295,14 @@ async def get_path_by_id(path_id: str):
     doc = await pending_paths_collection.find_one({"_id": obj_id})
     if doc:
         doc["status"] = "under_admin_review"
-        return serialize_mongo_doc(doc)
+        serialized = serialize_mongo_doc(doc)
+        return await enrich_path_profile(serialized)
         
     doc = await published_paths_collection.find_one({"_id": obj_id})
     if doc:
         doc["status"] = "published"
-        return serialize_mongo_doc(doc)
+        serialized = serialize_mongo_doc(doc)
+        return await enrich_path_profile(serialized)
         
     raise HTTPException(status_code=404, detail="Career path not found")
 
@@ -1278,7 +1324,7 @@ async def update_path(path_id: str, req: UpdatePathRequest):
                 **pending_doc,
                 "roadmap_data": req.roadmap_data,
                 "status": "published",
-                "published_at": datetime.datetime.utcnow()
+                "published_at": datetime.datetime.now(datetime.timezone.utc)
             }
             if "updated_at" in published_doc:
                 del published_doc["updated_at"]
@@ -1294,7 +1340,7 @@ async def update_path(path_id: str, req: UpdatePathRequest):
                 {"$set": {
                     "roadmap_data": req.roadmap_data,
                     "status": req.status,
-                    "updated_at": datetime.datetime.utcnow()
+                    "updated_at": datetime.datetime.now(datetime.timezone.utc)
                 }}
             )
             return {"message": f"Successfully updated career path status to {req.status}", "status": req.status}
@@ -1307,7 +1353,7 @@ async def update_path(path_id: str, req: UpdatePathRequest):
             {"$set": {
                 "roadmap_data": req.roadmap_data,
                 "status": req.status,
-                "updated_at": datetime.datetime.utcnow()
+                "updated_at": datetime.datetime.now(datetime.timezone.utc)
             }}
         )
         return {"message": f"Successfully updated career path status to {req.status}", "status": req.status}

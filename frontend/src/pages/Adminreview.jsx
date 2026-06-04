@@ -27,6 +27,22 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
   const [editedRoadmap, setEditedRoadmap] = useState(null);
   const [globalNote, setGlobalNote] = useState("");
 
+  // Editing states
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editingMilestoneIdx, setEditingMilestoneIdx] = useState(null);
+  const [editingBlindSpots, setEditingBlindSpots] = useState(false);
+
+  // Temporary/backup states for the sections being edited
+  const [tempDetails, setTempDetails] = useState({
+    path_title: "",
+    path_description: "",
+    readiness_score: 0,
+    readiness_label: "",
+    total_duration: ""
+  });
+  const [tempMilestone, setTempMilestone] = useState(null);
+  const [tempBlindSpots, setTempBlindSpots] = useState([]);
+
   // Load the queue of paths from MongoDB
   async function loadQueue() {
     setLoadingQueue(true);
@@ -55,41 +71,149 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
     setEditedRoadmap(JSON.parse(JSON.stringify(pathDoc.roadmap_data))); // deep copy
     setGlobalNote(pathDoc.admin_notes || "");
     setSuccessMsg("");
+    setEditingDetails(false);
+    setEditingMilestoneIdx(null);
+    setEditingBlindSpots(false);
   }
 
-  // Handle inline changes in the editor
-  function handleMilestoneChange(index, field, value) {
-    setEditedRoadmap(prev => {
+  // Handle temp milestone changes in the editor
+  function handleTempMilestoneChange(field, value) {
+    setTempMilestone(prev => {
       const copy = { ...prev };
-      copy.macro_path[index][field] = value;
+      copy[field] = value;
       return copy;
     });
   }
 
-  // Handle marketplace resource changes in the editor
-  function handleMarketplaceChange(mIndex, type, rIndex, field, value) {
-    setEditedRoadmap(prev => {
+  // Handle temp marketplace resource changes in the editor
+  function handleTempMarketplaceChange(type, rIndex, field, value) {
+    setTempMilestone(prev => {
       const copy = { ...prev };
-      copy.macro_path[mIndex].marketplace[type][rIndex][field] = value;
+      copy.marketplace[type][rIndex][field] = value;
       return copy;
     });
   }
 
-  // Handle micro step changes in the editor
-  function handleMicroStepChange(mIndex, sIndex, field, value) {
-    setEditedRoadmap(prev => {
+  // Handle temp micro step changes in the editor
+  function handleTempMicroStepChange(sIndex, field, value) {
+    setTempMilestone(prev => {
       const copy = { ...prev };
-      copy.macro_path[mIndex].micro_steps[sIndex][field] = value;
+      copy.micro_steps[sIndex][field] = value;
       return copy;
     });
   }
 
-  // Handle general roadmap metric changes
-  function handleGeneralChange(field, value) {
-    setEditedRoadmap(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  // Section Save/Cancel logic
+  function handleStartEditDetails() {
+    setTempDetails({
+      path_title: editedRoadmap.path_title || "",
+      path_description: editedRoadmap.path_description || "",
+      readiness_score: editedRoadmap.readiness_score || 0,
+      readiness_label: editedRoadmap.readiness_label || "",
+      total_duration: editedRoadmap.total_duration || ""
+    });
+    setEditingDetails(true);
+  }
+
+  async function handleSaveDetails() {
+    const updatedRoadmap = {
+      ...editedRoadmap,
+      ...tempDetails
+    };
+    const success = await saveRoadmapUpdate(updatedRoadmap);
+    if (success) {
+      setEditedRoadmap(updatedRoadmap);
+      setEditingDetails(false);
+    }
+  }
+
+  function handleCancelEditDetails() {
+    setEditingDetails(false);
+  }
+
+  function handleStartEditMilestone(idx) {
+    setEditingMilestoneIdx(idx);
+    setTempMilestone(JSON.parse(JSON.stringify(editedRoadmap.macro_path[idx])));
+  }
+
+  async function handleSaveMilestone(idx) {
+    const updatedMacroPath = [...editedRoadmap.macro_path];
+    updatedMacroPath[idx] = tempMilestone;
+    const updatedRoadmap = {
+      ...editedRoadmap,
+      macro_path: updatedMacroPath
+    };
+    const success = await saveRoadmapUpdate(updatedRoadmap);
+    if (success) {
+      setEditedRoadmap(updatedRoadmap);
+      setEditingMilestoneIdx(null);
+      setTempMilestone(null);
+    }
+  }
+
+  function handleCancelEditMilestone() {
+    setEditingMilestoneIdx(null);
+    setTempMilestone(null);
+  }
+
+  function handleStartEditBlindSpots() {
+    setTempBlindSpots([...(editedRoadmap.blind_spots || [])]);
+    setEditingBlindSpots(true);
+  }
+
+  async function handleSaveBlindSpots() {
+    const updatedRoadmap = {
+      ...editedRoadmap,
+      blind_spots: tempBlindSpots
+    };
+    const success = await saveRoadmapUpdate(updatedRoadmap);
+    if (success) {
+      setEditedRoadmap(updatedRoadmap);
+      setEditingBlindSpots(false);
+    }
+  }
+
+  function handleCancelEditBlindSpots() {
+    setEditingBlindSpots(false);
+  }
+
+  async function saveRoadmapUpdate(updatedRoadmap) {
+    if (!selectedPath || !updatedRoadmap) return false;
+    setLoadingSubmit(true);
+    setError("");
+    try {
+      const res = await fetch(`${API}/api/paths/${selectedPath.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roadmap_data: updatedRoadmap,
+          status: selectedPath.status // "under_admin_review" (preserves status)
+        })
+      });
+      if (!res.ok) throw new Error("Failed to update career path in database");
+      
+      // Update local pathsQueue with the new values
+      setPathsQueue(prevQueue => {
+        return prevQueue.map(p => {
+          if (p.id === selectedPath.id) {
+            return {
+              ...p,
+              roadmap_data: updatedRoadmap
+            };
+          }
+          return p;
+        });
+      });
+      
+      setSuccessMsg("Section changes saved successfully!");
+      setTimeout(() => setSuccessMsg(""), 3000);
+      return true;
+    } catch (e) {
+      setError(e.message);
+      return false;
+    } finally {
+      setLoadingSubmit(false);
+    }
   }
 
   // Submit the approved & curated roadmap back to MongoDB
@@ -275,8 +399,15 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
 
           {/* Quick Stats Edit */}
           <div className="ar-editor-stats-card card">
-            <h3>Global Metrics</h3>
-            {isReadOnly ? (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Global Metrics</h3>
+              {!isReadOnly && !editingDetails && (
+                <button className="btn-edit-section" onClick={handleStartEditDetails}>
+                  Edit Details
+                </button>
+              )}
+            </div>
+            {isReadOnly || !editingDetails ? (
               <div className="stats-read-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
                 <div className="stat-read-item" style={{ gridColumn: "span 3", borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 12 }}>
                   <span>Pathway Title</span>
@@ -310,8 +441,8 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                       type="text" 
                       style={{ width: "100%" }}
                       placeholder="e.g. Academic Pathway to Oxford"
-                      value={editedRoadmap.path_title || ""} 
-                      onChange={e => handleGeneralChange("path_title", e.target.value)}
+                      value={tempDetails.path_title} 
+                      onChange={e => setTempDetails(prev => ({ ...prev, path_title: e.target.value }))}
                     />
                   </div>
                   <div className="stat-edit-field">
@@ -319,9 +450,9 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                     <textarea 
                       rows={2}
                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid var(--border)", borderRadius: 10, fontFamily: "inherit", fontSize: 13, resize: "vertical" }}
-                      placeholder="Provide a multi-sentence strategic description of this pathway..."
-                      value={editedRoadmap.path_description || ""} 
-                      onChange={e => handleGeneralChange("path_description", e.target.value)}
+                      placeholder="Provide a description..."
+                      value={tempDetails.path_description} 
+                      onChange={e => setTempDetails(prev => ({ ...prev, path_description: e.target.value }))}
                     />
                   </div>
                 </div>
@@ -330,8 +461,8 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                     <label>Readiness Score (0-100)</label>
                     <input 
                       type="number" 
-                      value={editedRoadmap.readiness_score || 0} 
-                      onChange={e => handleGeneralChange("readiness_score", parseInt(e.target.value) || 0)}
+                      value={tempDetails.readiness_score} 
+                      onChange={e => setTempDetails(prev => ({ ...prev, readiness_score: parseInt(e.target.value) || 0 }))}
                       min="0" max="100"
                     />
                   </div>
@@ -339,18 +470,22 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                     <label>Readiness Label</label>
                     <input 
                       type="text" 
-                      value={editedRoadmap.readiness_label || ""} 
-                      onChange={e => handleGeneralChange("readiness_label", e.target.value)}
+                      value={tempDetails.readiness_label} 
+                      onChange={e => setTempDetails(prev => ({ ...prev, readiness_label: e.target.value }))}
                     />
                   </div>
                   <div className="stat-edit-field">
                     <label>Total Duration</label>
                     <input 
                       type="text" 
-                      value={editedRoadmap.total_duration || ""} 
-                      onChange={e => handleGeneralChange("total_duration", e.target.value)}
+                      value={tempDetails.total_duration} 
+                      onChange={e => setTempDetails(prev => ({ ...prev, total_duration: e.target.value }))}
                     />
                   </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 12 }}>
+                  <button className="btn-cancel-section" onClick={handleCancelEditDetails}>Cancel</button>
+                  <button className="btn-save-section" onClick={handleSaveDetails}>Save Details</button>
                 </div>
               </div>
             )}
@@ -360,244 +495,367 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
           <div className="ar-milestones-editor-list">
             <div className="section-label">Milestones & Resources</div>
             
-            {editedRoadmap.macro_path?.map((milestone, mIdx) => (
-              <div key={milestone.id} className="ar-editor-milestone-card card">
-                <div className="m-header">
-                  <div className="m-number">{milestone.id}</div>
-                  
-                  {isReadOnly ? (
-                    <div className="m-title-view">
-                      <div className="m-title-row-view">
-                        <h2>{milestone.title}</h2>
-                        <span className="m-dur-badge">{milestone.duration}</span>
-                      </div>
-                      <p className="m-desc-text">{milestone.description}</p>
-                    </div>
-                  ) : (
-                    <div className="m-title-fields">
-                      <div className="m-title-input-row">
-                        <input 
-                          type="text" 
-                          className="m-title-input"
-                          placeholder="Milestone Title"
-                          value={milestone.title} 
-                          onChange={e => handleMilestoneChange(mIdx, "title", e.target.value)}
-                        />
-                        <input 
-                          type="text" 
-                          className="m-duration-input" 
-                          placeholder="e.g. Months 1-3"
-                          value={milestone.duration}
-                          onChange={e => handleMilestoneChange(mIdx, "duration", e.target.value)}
-                        />
-                      </div>
-                      <textarea 
-                        className="m-desc-input"
-                        placeholder="High-level milestone description..."
-                        rows={2}
-                        value={milestone.description}
-                        onChange={e => handleMilestoneChange(mIdx, "description", e.target.value)}
-                      />
-                    </div>
-                  )}
-                </div>
+            {editedRoadmap.macro_path?.map((milestone, mIdx) => {
+              const isMilestoneEditing = editingMilestoneIdx === mIdx;
+              const activeMilestone = isMilestoneEditing ? tempMilestone : milestone;
 
-                {/* Triple Views Curation */}
-                <div className="editor-views-grid">
-                  {[
-                    { key: "macro_view", label: "Macro View (High Level Outcome)", colorClass: "macro" },
-                    { key: "micro_view", label: "Micro View (Execution Output)", colorClass: "micro" },
-                    { key: "nano_view", label: "Nano View (Mentor Guidance focus)", colorClass: "nano" }
-                  ].map(v => (
-                    <div key={v.key} className={`view-edit-box ${v.colorClass}`}>
-                      <span className="view-lbl">{v.label}</span>
-                      {isReadOnly ? (
-                        <p className="view-read-text">{milestone[v.key] || "No description provided."}</p>
+              return (
+                <div key={milestone.id} className="ar-editor-milestone-card card">
+                  <div className="m-header" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ display: "flex", gap: 16, flex: 1 }}>
+                      <div className="m-number">{milestone.id}</div>
+                      
+                      {!isMilestoneEditing ? (
+                        <div className="m-title-view">
+                          <div className="m-title-row-view">
+                            <h2>{milestone.title}</h2>
+                            <span className="m-dur-badge">{milestone.duration}</span>
+                          </div>
+                          <p className="m-desc-text">{milestone.description}</p>
+                        </div>
                       ) : (
-                        <textarea 
-                          value={milestone[v.key] || ""} 
-                          onChange={e => handleMilestoneChange(mIdx, v.key, e.target.value)}
-                          rows={2}
-                        />
+                        <div className="m-title-fields">
+                          <div className="m-title-input-row">
+                            <input 
+                              type="text" 
+                              className="m-title-input"
+                              placeholder="Milestone Title"
+                              value={activeMilestone.title} 
+                              onChange={e => handleTempMilestoneChange("title", e.target.value)}
+                            />
+                            <input 
+                              type="text" 
+                              className="m-duration-input" 
+                              placeholder="e.g. Months 1-3"
+                              value={activeMilestone.duration}
+                              onChange={e => handleTempMilestoneChange("duration", e.target.value)}
+                            />
+                          </div>
+                          <textarea 
+                            className="m-desc-input"
+                            placeholder="High-level milestone description..."
+                            rows={2}
+                            value={activeMilestone.description}
+                            onChange={e => handleTempMilestoneChange("description", e.target.value)}
+                          />
+                        </div>
                       )}
                     </div>
-                  ))}
+                    {!isReadOnly && !isMilestoneEditing && (
+                      <button className="btn-edit-section" onClick={() => handleStartEditMilestone(mIdx)}>
+                        Edit Step
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Triple Views Curation */}
+                  <div className="editor-views-grid">
+                    {[
+                      { key: "macro_view", label: "Macro View (High Level Outcome)", colorClass: "macro" },
+                      { key: "micro_view", label: "Micro View (Execution Output)", colorClass: "micro" },
+                      { key: "nano_view", label: "Nano View (Mentor Guidance focus)", colorClass: "nano" }
+                    ].map(v => (
+                      <div key={v.key} className={`view-edit-box ${v.colorClass}`}>
+                        <span className="view-lbl">{v.label}</span>
+                        {!isMilestoneEditing ? (
+                          <p className="view-read-text">{activeMilestone[v.key] || "No description provided."}</p>
+                        ) : (
+                          <textarea 
+                            value={activeMilestone[v.key] || ""} 
+                            onChange={e => handleTempMilestoneChange(v.key, e.target.value)}
+                            rows={2}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Actionable Micro Steps Checklist */}
+                  <div className="editor-steps-section" style={{ marginBottom: 20 }}>
+                    <div className="section-sublabel">Execution Steps Checklist</div>
+                    {!isMilestoneEditing ? (
+                      <div className="steps-read-list">
+                        {activeMilestone.micro_steps?.map((step, sIdx) => (
+                          <div key={sIdx} className="step-read-row">
+                            <div className="step-read-num">{sIdx + 1}</div>
+                            <div className="step-read-task">{step.task}</div>
+                            {step.resource && <div className="step-read-res-badge">{step.resource}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="steps-edit-list">
+                        {activeMilestone.micro_steps?.map((step, sIdx) => (
+                          <div key={sIdx} className="step-edit-row">
+                            <div className="step-num">{sIdx + 1}</div>
+                            <input 
+                              type="text" 
+                              className="task-input" 
+                              placeholder="Action task description"
+                              value={step.task}
+                              onChange={e => handleTempMicroStepChange(sIdx, "task", e.target.value)}
+                            />
+                            <input 
+                              type="text" 
+                              className="resource-input" 
+                              placeholder="Recommended resource"
+                              value={step.resource}
+                              onChange={e => handleTempMicroStepChange(sIdx, "resource", e.target.value)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Marketplace Resources */}
+                  <div className="editor-marketplace-section">
+                    <div className="section-sublabel">Marketplace calibration</div>
+                    
+                    {/* Macro Free */}
+                    <div className="market-group">
+                      <div className="market-group-title free">Free Content / Community Resources</div>
+                      <div className="market-items-grid">
+                        {activeMilestone.marketplace?.macro_free?.map((res, rIdx) => (
+                          <div key={rIdx} className="market-card-wrapper">
+                            {!isMilestoneEditing ? (
+                              <div className="market-read-card card-free">
+                                <strong>{res.name}</strong>
+                                <div className="res-read-meta">
+                                  <span className="m-chip free">{res.type}</span>
+                                </div>
+                                <p className="res-why">{res.why}</p>
+                                {res.next_step && <div className="res-read-next">Action: <strong>{res.next_step}</strong></div>}
+                              </div>
+                            ) : (
+                              <div className="market-edit-card">
+                                <input 
+                                  type="text" 
+                                  className="res-name" 
+                                  placeholder="Resource Name"
+                                  value={res.name}
+                                  onChange={e => handleTempMarketplaceChange("macro_free", rIdx, "name", e.target.value)}
+                                />
+                                <div className="res-row-2">
+                                  <input 
+                                    type="text" 
+                                    placeholder="Type"
+                                    value={res.type}
+                                    onChange={e => handleTempMarketplaceChange("macro_free", rIdx, "type", e.target.value)}
+                                  />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Next Step"
+                                    value={res.next_step}
+                                    onChange={e => handleTempMarketplaceChange("macro_free", rIdx, "next_step", e.target.value)}
+                                  />
+                                </div>
+                                <textarea 
+                                  placeholder="Value proposition statement..."
+                                  value={res.why}
+                                  onChange={e => handleTempMarketplaceChange("macro_free", rIdx, "why", e.target.value)}
+                                  rows={2}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Micro Structured */}
+                    <div className="market-group">
+                      <div className="market-group-title structured">Structured / Paid Certifications</div>
+                      <div className="market-items-grid">
+                        {activeMilestone.marketplace?.micro_structured?.map((res, rIdx) => (
+                          <div key={rIdx} className="market-card-wrapper">
+                            {!isMilestoneEditing ? (
+                              <div className="market-read-card card-structured">
+                                <strong>{res.name}</strong>
+                                <div className="res-read-meta">
+                                  <span className="m-chip structured">{res.type}</span>
+                                  <span className="m-cost">{res.cost}</span>
+                                  <span className="m-dur">{res.duration}</span>
+                                </div>
+                                <p className="res-why">{res.value}</p>
+                                {res.next_step && <div className="res-read-next">Action: <strong>{res.next_step}</strong></div>}
+                              </div>
+                            ) : (
+                              <div className="market-edit-card">
+                                <input 
+                                  type="text" 
+                                  className="res-name" 
+                                  placeholder="Course/Bootcamp Name"
+                                  value={res.name}
+                                  onChange={e => handleTempMarketplaceChange("micro_structured", rIdx, "name", e.target.value)}
+                                />
+                                <div className="res-row-3">
+                                  <input 
+                                    type="text" 
+                                    placeholder="Cost"
+                                    value={res.cost}
+                                    onChange={e => handleTempMarketplaceChange("micro_structured", rIdx, "cost", e.target.value)}
+                                  />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Duration"
+                                    value={res.duration}
+                                    onChange={e => handleTempMarketplaceChange("micro_structured", rIdx, "duration", e.target.value)}
+                                  />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Next step"
+                                    value={res.next_step}
+                                    onChange={e => handleTempMarketplaceChange("micro_structured", rIdx, "next_step", e.target.value)}
+                                  />
+                                </div>
+                                <textarea 
+                                  placeholder="Value proposition statement..."
+                                  value={res.value}
+                                  onChange={e => handleTempMarketplaceChange("micro_structured", rIdx, "value", e.target.value)}
+                                  rows={2}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Nano Expert */}
+                    <div className="market-group">
+                      <div className="market-group-title expert">Expert Mentors & Personal Counselors</div>
+                      <div className="market-items-grid">
+                        {activeMilestone.marketplace?.nano_expert?.map((res, rIdx) => (
+                          <div key={rIdx} className="market-card-wrapper">
+                            {!isMilestoneEditing ? (
+                              <div className="market-read-card card-expert">
+                                <strong>{res.name}</strong>
+                                <div className="res-read-meta">
+                                  <span className="m-chip expert">{res.type}</span>
+                                  <span className="m-cost">{res.price}</span>
+                                </div>
+                                <p className="res-why">{res.expected_outcomes}</p>
+                                {res.session_details && <div className="res-read-next">Format: <strong>{res.session_details}</strong></div>}
+                              </div>
+                            ) : (
+                              <div className="market-edit-card">
+                                <input 
+                                  type="text" 
+                                  className="res-name" 
+                                  placeholder="Mentor or Service Name"
+                                  value={res.name}
+                                  onChange={e => handleTempMarketplaceChange("nano_expert", rIdx, "name", e.target.value)}
+                                />
+                                <div className="res-row-2">
+                                  <input 
+                                    type="text" 
+                                    placeholder="Price"
+                                    value={res.price}
+                                    onChange={e => handleTempMarketplaceChange("nano_expert", rIdx, "price", e.target.value)}
+                                  />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Details"
+                                    value={res.session_details}
+                                    onChange={e => handleTempMarketplaceChange("nano_expert", rIdx, "session_details", e.target.value)}
+                                  />
+                                </div>
+                                <textarea 
+                                  placeholder="Expected Mentorship outcomes..."
+                                  value={res.expected_outcomes}
+                                  onChange={e => handleTempMarketplaceChange("nano_expert", rIdx, "expected_outcomes", e.target.value)}
+                                  rows={2}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {isMilestoneEditing && (
+                    <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20 }}>
+                      <button className="btn-cancel-section" onClick={handleCancelEditMilestone}>Cancel</button>
+                      <button className="btn-save-section" onClick={() => handleSaveMilestone(mIdx)}>Save Step</button>
+                    </div>
+                  )}
+
                 </div>
+              );
+            })}
+          </div>
 
+          {/* Blind Spots Editor */}
+          <div className="ar-editor-stats-card card" style={{ marginTop: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0 }}>Pathway Blind Spots / Gaps</h3>
+              {!isReadOnly && !editingBlindSpots && (
+                <button className="btn-edit-section" onClick={handleStartEditBlindSpots}>
+                  Edit Blind Spots
+                </button>
+              )}
+            </div>
 
-                {/* Marketplace Resources */}
-                <div className="editor-marketplace-section">
-                  <div className="section-sublabel">Marketplace calibration</div>
-                  
-                  {/* Macro Free */}
-                  <div className="market-group">
-                    <div className="market-group-title free">Free Content / Community Resources</div>
-                    <div className="market-items-grid">
-                      {milestone.marketplace?.macro_free?.map((res, rIdx) => (
-                        <div key={rIdx} className="market-card-wrapper">
-                          {isReadOnly ? (
-                            <div className="market-read-card card-free">
-                              <strong>{res.name}</strong>
-                              <div className="res-read-meta">
-                                <span className="m-chip free">{res.type}</span>
-                              </div>
-                              <p className="res-why">{res.why}</p>
-                              {res.next_step && <div className="res-read-next">Action: <strong>{res.next_step}</strong></div>}
-                            </div>
-                          ) : (
-                            <div className="market-edit-card">
-                              <input 
-                                type="text" 
-                                className="res-name" 
-                                placeholder="Resource Name"
-                                value={res.name}
-                                onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "name", e.target.value)}
-                              />
-                              <div className="res-row-2">
-                                <input 
-                                  type="text" 
-                                  placeholder="Type"
-                                  value={res.type}
-                                  onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "type", e.target.value)}
-                                />
-                                <input 
-                                  type="text" 
-                                  placeholder="Next Step"
-                                  value={res.next_step}
-                                  onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "next_step", e.target.value)}
-                                />
-                              </div>
-                              <textarea 
-                                placeholder="Value proposition statement..."
-                                value={res.why}
-                                onChange={e => handleMarketplaceChange(mIdx, "macro_free", rIdx, "why", e.target.value)}
-                                rows={2}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+            {isReadOnly || !editingBlindSpots ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {editedRoadmap.blind_spots && editedRoadmap.blind_spots.length > 0 ? (
+                  <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, lineHeight: 1.6, color: "var(--text2)" }}>
+                    {editedRoadmap.blind_spots.map((spot, idx) => (
+                      <li key={idx}>{spot}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--text3)", fontStyle: "italic" }}>No blind spots identified.</p>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {tempBlindSpots.map((spot, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input 
+                      type="text" 
+                      style={{ flex: 1, padding: "8px 12px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13 }}
+                      value={spot}
+                      onChange={e => {
+                        const copy = [...tempBlindSpots];
+                        copy[idx] = e.target.value;
+                        setTempBlindSpots(copy);
+                      }}
+                    />
+                    <button 
+                      className="btn-cancel-section" 
+                      style={{ padding: "8px 12px", color: "var(--red)", borderColor: "rgba(232,49,42,0.15)", background: "var(--red-soft)" }}
+                      onClick={() => {
+                        const copy = tempBlindSpots.filter((_, i) => i !== idx);
+                        setTempBlindSpots(copy);
+                      }}
+                    >
+                      Delete
+                    </button>
                   </div>
+                ))}
+                
+                <button 
+                  className="btn-edit-section" 
+                  style={{ alignSelf: "flex-start", marginTop: 4 }}
+                  onClick={() => setTempBlindSpots([...tempBlindSpots, ""])}
+                >
+                  + Add Blind Spot
+                </button>
 
-                  {/* Micro Structured */}
-                  <div className="market-group">
-                    <div className="market-group-title structured">Structured / Paid Certifications</div>
-                    <div className="market-items-grid">
-                      {milestone.marketplace?.micro_structured?.map((res, rIdx) => (
-                        <div key={rIdx} className="market-card-wrapper">
-                          {isReadOnly ? (
-                            <div className="market-read-card card-structured">
-                              <strong>{res.name}</strong>
-                              <div className="res-read-meta">
-                                <span className="m-chip structured">{res.type}</span>
-                                <span className="m-cost">{res.cost}</span>
-                                <span className="m-dur">{res.duration}</span>
-                              </div>
-                              <p className="res-why">{res.value}</p>
-                              {res.next_step && <div className="res-read-next">Action: <strong>{res.next_step}</strong></div>}
-                            </div>
-                          ) : (
-                            <div className="market-edit-card">
-                              <input 
-                                type="text" 
-                                className="res-name" 
-                                placeholder="Course/Bootcamp Name"
-                                value={res.name}
-                                onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "name", e.target.value)}
-                              />
-                              <div className="res-row-3">
-                                <input 
-                                  type="text" 
-                                  placeholder="Cost"
-                                  value={res.cost}
-                                  onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "cost", e.target.value)}
-                                />
-                                <input 
-                                  type="text" 
-                                  placeholder="Duration"
-                                  value={res.duration}
-                                  onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "duration", e.target.value)}
-                                />
-                                <input 
-                                  type="text" 
-                                  placeholder="Next step"
-                                  value={res.next_step}
-                                  onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "next_step", e.target.value)}
-                                />
-                              </div>
-                              <textarea 
-                                placeholder="Value proposition statement..."
-                                value={res.value}
-                                onChange={e => handleMarketplaceChange(mIdx, "micro_structured", rIdx, "value", e.target.value)}
-                                rows={2}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Nano Expert */}
-                  <div className="market-group">
-                    <div className="market-group-title expert">Expert Mentors & Personal Counselors</div>
-                    <div className="market-items-grid">
-                      {milestone.marketplace?.nano_expert?.map((res, rIdx) => (
-                        <div key={rIdx} className="market-card-wrapper">
-                          {isReadOnly ? (
-                            <div className="market-read-card card-expert">
-                              <strong>{res.name}</strong>
-                              <div className="res-read-meta">
-                                <span className="m-chip expert">{res.type}</span>
-                                <span className="m-cost">{res.price}</span>
-                              </div>
-                              <p className="res-why">{res.expected_outcomes}</p>
-                              {res.session_details && <div className="res-read-next">Format: <strong>{res.session_details}</strong></div>}
-                            </div>
-                          ) : (
-                            <div className="market-edit-card">
-                              <input 
-                                type="text" 
-                                className="res-name" 
-                                placeholder="Mentor or Service Name"
-                                value={res.name}
-                                onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "name", e.target.value)}
-                              />
-                              <div className="res-row-2">
-                                <input 
-                                  type="text" 
-                                  placeholder="Price"
-                                  value={res.price}
-                                  onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "price", e.target.value)}
-                                />
-                                <input 
-                                  type="text" 
-                                  placeholder="Details"
-                                  value={res.session_details}
-                                  onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "session_details", e.target.value)}
-                                />
-                              </div>
-                              <textarea 
-                                placeholder="Expected Mentorship outcomes..."
-                                value={res.expected_outcomes}
-                                onChange={e => handleMarketplaceChange(mIdx, "nano_expert", rIdx, "expected_outcomes", e.target.value)}
-                                rows={2}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 12 }}>
+                  <button className="btn-cancel-section" onClick={handleCancelEditBlindSpots}>Cancel</button>
+                  <button className="btn-save-section" onClick={handleSaveBlindSpots}>Save Spots</button>
                 </div>
               </div>
-            ))}
+            )}
           </div>
 
           {/* Action Row */}
-          <div className="editor-action-card card">
+          <div className="editor-action-card card" style={{ marginTop: 24 }}>
             {isReadOnly ? (
               <div className="editor-submit-box">
                 <h3>Published & Locked</h3>
@@ -619,7 +877,7 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                     onClick={() => setSelectedPath(null)}
                     disabled={loadingSubmit}
                   >
-                    Discard Changes
+                    Close & Return
                   </button>
                   <button 
                     className="btn-primary approve-btn" 
@@ -640,6 +898,53 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
 }
 
 const sharedStyles = `
+  .btn-edit-section {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-edit-section:hover {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .btn-save-section {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--green);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-save-section:hover {
+    background: #2b9045;
+  }
+
+  .btn-cancel-section {
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-cancel-section:hover {
+    border-color: var(--text);
+    color: var(--text);
+  }
+
   .ar-page {
     max-width: 1040px;
     margin: 0 auto;
