@@ -7,10 +7,11 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from groq import Groq
+from groq import Groq, AsyncGroq
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+from models import StudentProfileModel
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ app.add_middleware(
 )
 
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+async_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # MongoDB Setup
 MONGODB_URI = os.environ.get("MONGODB_URI")
@@ -31,7 +33,20 @@ if not MONGODB_URI:
     raise ValueError("MONGODB_URI environment variable is missing from .env")
 db_client = AsyncIOMotorClient(MONGODB_URI)
 db = db_client.get_database("naaviagent")
-paths_collection = db.paths
+profiles_collection = db.profiles
+pending_paths_collection = db.pending_paths
+published_paths_collection = db.published_paths
+
+@app.on_event("startup")
+async def startup_db_init():
+    try:
+        existing_cols = await db.list_collection_names()
+        for col in ["profiles", "pending_paths", "published_paths"]:
+            if col not in existing_cols:
+                await db.create_collection(col)
+                print(f"[MongoDB] Created collection '{col}' successfully.")
+    except Exception as e:
+        print(f"[MongoDB Init Warning] Could not pre-create collections: {e}")
 
 # Models
 class PathGenerationRequest(BaseModel):
@@ -361,15 +376,15 @@ def recursive_sanitize(obj, name_tokens: list):
     return obj
 
 # Helper to query Groq and extract clean JSON with model fallbacks
-async def query_groq_json(prompt: str, preferred_model: str = "llama-3.3-70b-versatile") -> dict:
+async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-instant") -> dict:
     models = [
         preferred_model,
-        "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
         "meta-llama/llama-4-scout-17b-16e-instruct",
-        "openai/gpt-oss-120b",
-        "qwen/qwen3-32b",
         "openai/gpt-oss-20b",
+        "qwen/qwen3-32b",
+        "llama-3.3-70b-versatile",
+        "openai/gpt-oss-120b",
         "groq/compound"
     ]
 
@@ -392,7 +407,7 @@ async def query_groq_json(prompt: str, preferred_model: str = "llama-3.3-70b-ver
             else:
                 max_tok = 4000
 
-            response = client.chat.completions.create(
+            response = await async_client.chat.completions.create(
                 model=m,
                 max_tokens=max_tok,
                 temperature=0.3,
@@ -603,14 +618,14 @@ async def run_agent_1_blueprint(current: str, goal: str, profile: dict) -> dict:
         target_goal=goal,
         profile=json.dumps(profile)
     )
-    print("[Agent 1] Generating initial roadmap blueprint using 70B (with 8B fallback)...")
-    res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
+    print("[Agent 1] Generating initial roadmap blueprint using 8B (with 70B fallback)...")
+    res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
     
     # If the daily token limit is exhausted, query_groq_json returns {}
     if not res or "macro_path" not in res:
         print("[Rate Limit Warning] Daily token limit exceeded. Serving board-calibrated fallback roadmap.")
-        # Try to call 8B model directly
-        res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
+        # Try to call 70B model directly
+        res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
         if not res or "macro_path" not in res:
             # Full lockout: serve high-fidelity static mock custom-built for CBSE/Cambridge
             return get_fallback_mock_roadmap(current, goal, profile)
@@ -682,6 +697,40 @@ async def run_agent_4_marketplace_auditor(blueprint: dict, current: str, goal: s
 
 
 # ─── API ENDPOINTS ────────────────────────────────────────────────────────
+
+@app.post("/api/profile")
+async def save_profile(profile: StudentProfileModel):
+    existing = await profiles_collection.find_one({"email": profile.email.lower()})
+    profile_dict = profile.dict(by_alias=True, exclude_none=True)
+    profile_dict["email"] = profile_dict["email"].lower()
+    
+    if "_id" in profile_dict:
+        del profile_dict["_id"]
+    if "id" in profile_dict:
+        del profile_dict["id"]
+        
+    profile_dict["updated_at"] = datetime.datetime.utcnow()
+    
+    if existing:
+        await profiles_collection.update_one(
+            {"email": profile.email.lower()},
+            {"$set": profile_dict}
+        )
+        updated_doc = await profiles_collection.find_one({"email": profile.email.lower()})
+        return serialize_mongo_doc(updated_doc)
+    else:
+        profile_dict["created_at"] = datetime.datetime.utcnow()
+        result = await profiles_collection.insert_one(profile_dict)
+        profile_dict["id"] = str(result.inserted_id)
+        return serialize_mongo_doc(profile_dict)
+
+@app.get("/api/profile/{email}")
+async def get_profile(email: str):
+    doc = await profiles_collection.find_one({"email": email.lower()})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return serialize_mongo_doc(doc)
+
 
 @app.post("/api/path")
 async def generate_path(req: PathGenerationRequest):
@@ -772,7 +821,7 @@ async def generate_path(req: PathGenerationRequest):
             "created_at": datetime.datetime.utcnow()
         }
         
-        insert_result = await paths_collection.insert_one(path_doc)
+        insert_result = await pending_paths_collection.insert_one(path_doc)
         final_json["db_id"] = str(insert_result.inserted_id)
         final_json["status"] = "under_admin_review"
         
@@ -797,7 +846,7 @@ async def generate_path(req: PathGenerationRequest):
                 "status": "under_admin_review",
                 "created_at": datetime.datetime.utcnow()
             }
-            insert_result = await paths_collection.insert_one(path_doc)
+            insert_result = await pending_paths_collection.insert_one(path_doc)
             final_json["db_id"] = str(insert_result.inserted_id)
             final_json["status"] = "under_admin_review"
             print(f"[MongoDB] Cached fallback roadmap {final_json['db_id']} under review successfully.")
@@ -811,6 +860,8 @@ async def generate_path(req: PathGenerationRequest):
 
 @app.post("/api/path/blueprint")
 async def generate_path_blueprint(req: PathGenerationRequest):
+    import time
+    start_time = time.time()
     current = req.current_position.strip()
     goal = req.target_goal.strip()
     profile = req.profile or {}
@@ -820,6 +871,8 @@ async def generate_path_blueprint(req: PathGenerationRequest):
     
     try:
         blueprint = await run_agent_1_blueprint(current, goal, profile)
+        elapsed = time.time() - start_time
+        print(f"[Blueprint API] Generated initial blueprint in {elapsed:.2f} seconds.")
         return blueprint
     except Exception as e:
         print(f"[Blueprint API Error] {e}")
@@ -828,6 +881,8 @@ async def generate_path_blueprint(req: PathGenerationRequest):
 
 @app.post("/api/path/audit")
 async def generate_path_audit(req: PathAuditRequest):
+    import time
+    start_time = time.time()
     blueprint = req.blueprint
     current = req.current_position.strip()
     goal = req.target_goal.strip()
@@ -910,11 +965,13 @@ async def generate_path_audit(req: PathAuditRequest):
             "created_at": datetime.datetime.utcnow()
         }
         
-        insert_result = await paths_collection.insert_one(path_doc)
+        insert_result = await pending_paths_collection.insert_one(path_doc)
         final_json["db_id"] = str(insert_result.inserted_id)
         final_json["status"] = "under_admin_review"
         
+        elapsed = time.time() - start_time
         print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
+        print(f"[Audit API] Parallel audit and cache completed in {elapsed:.2f} seconds.")
         return final_json
         
     except Exception as e:
@@ -934,7 +991,7 @@ async def generate_path_audit(req: PathAuditRequest):
                 "status": "under_admin_review",
                 "created_at": datetime.datetime.utcnow()
             }
-            insert_result = await paths_collection.insert_one(path_doc)
+            insert_result = await pending_paths_collection.insert_one(path_doc)
             final_json["db_id"] = str(insert_result.inserted_id)
             final_json["status"] = "under_admin_review"
         except Exception:
@@ -961,14 +1018,26 @@ async def generate_path_legacy(req: GoalRequest):
 # Admin Endpoint: Get all paths under review
 @app.get("/api/admin/paths")
 async def get_admin_paths(status: Optional[str] = "under_admin_review"):
-    query_filter = {}
-    if status and status != "all" and status != "None":
-        query_filter["status"] = status
-        
-    cursor = paths_collection.find(query_filter).sort("created_at", -1)
     paths = []
-    async for doc in cursor:
-        paths.append(serialize_mongo_doc(doc))
+    
+    # If status is "under_admin_review" or "all":
+    if status == "under_admin_review" or status == "all":
+        cursor = pending_paths_collection.find({}).sort("created_at", -1)
+        async for doc in cursor:
+            doc["status"] = "under_admin_review"
+            paths.append(serialize_mongo_doc(doc))
+            
+    # If status is "published" or "all":
+    if status == "published" or status == "all":
+        cursor = published_paths_collection.find({}).sort("created_at", -1)
+        async for doc in cursor:
+            doc["status"] = "published"
+            paths.append(serialize_mongo_doc(doc))
+            
+    # Sort them combined by created_at desc if status was "all"
+    if status == "all":
+        paths.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        
     return paths
 
 # Get a single path by ID
@@ -979,10 +1048,17 @@ async def get_path_by_id(path_id: str):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid path ID format")
         
-    doc = await paths_collection.find_one({"_id": obj_id})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Career path not found")
-    return serialize_mongo_doc(doc)
+    doc = await pending_paths_collection.find_one({"_id": obj_id})
+    if doc:
+        doc["status"] = "under_admin_review"
+        return serialize_mongo_doc(doc)
+        
+    doc = await published_paths_collection.find_one({"_id": obj_id})
+    if doc:
+        doc["status"] = "published"
+        return serialize_mongo_doc(doc)
+        
+    raise HTTPException(status_code=404, detail="Career path not found")
 
 # Update a path (Commit curation overrides & Publish)
 @app.put("/api/paths/{path_id}")
@@ -992,18 +1068,54 @@ async def update_path(path_id: str, req: UpdatePathRequest):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid path ID format")
         
-    result = await paths_collection.update_one(
-        {"_id": obj_id},
-        {"$set": {
-            "roadmap_data": req.roadmap_data,
-            "status": req.status,
-            "updated_at": datetime.datetime.utcnow()
-        }}
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Career path not found")
+    # Check if the path is currently in pending
+    pending_doc = await pending_paths_collection.find_one({"_id": obj_id})
+    
+    if pending_doc:
+        if req.status == "published":
+            # Migrate from pending to published
+            published_doc = {
+                "query": pending_doc.get("query"),
+                "current_position": pending_doc.get("current_position"),
+                "target_goal": pending_doc.get("target_goal"),
+                "profile": pending_doc.get("profile"),
+                "roadmap_data": req.roadmap_data,
+                "status": "published",
+                "created_at": pending_doc.get("created_at") or datetime.datetime.utcnow(),
+                "published_at": datetime.datetime.utcnow()
+            }
+            published_doc["_id"] = obj_id
+            await published_paths_collection.insert_one(published_doc)
+            
+            # Delete from pending_paths
+            await pending_paths_collection.delete_one({"_id": obj_id})
+            return {"message": "Successfully published career path", "status": "published"}
+        else:
+            # Just update the pending path
+            await pending_paths_collection.update_one(
+                {"_id": obj_id},
+                {"$set": {
+                    "roadmap_data": req.roadmap_data,
+                    "status": req.status,
+                    "updated_at": datetime.datetime.utcnow()
+                }}
+            )
+            return {"message": f"Successfully updated career path status to {req.status}", "status": req.status}
+            
+    # Check if the path is in published
+    published_doc = await published_paths_collection.find_one({"_id": obj_id})
+    if published_doc:
+        await published_paths_collection.update_one(
+            {"_id": obj_id},
+            {"$set": {
+                "roadmap_data": req.roadmap_data,
+                "status": req.status,
+                "updated_at": datetime.datetime.utcnow()
+            }}
+        )
+        return {"message": f"Successfully updated career path status to {req.status}", "status": req.status}
         
-    return {"message": f"Successfully updated career path status to {req.status}", "status": req.status}
+    raise HTTPException(status_code=404, detail="Career path not found")
 
 
 # Serve React frontend if built

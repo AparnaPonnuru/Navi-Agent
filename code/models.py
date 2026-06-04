@@ -53,19 +53,64 @@ class Milestone(BaseModel):
     micro_steps: List[MicroStep]
 
 
-# Main DB storage model for Career Paths
-class CareerPathModel(BaseModel):
-    id: Optional[str] = Field(default=None, alias="_id")  # MongoDB ObjectId string representation
-    query: str
-    current_position: str
-    target_goal: str
-    profile: Optional[Dict[str, Any]] = None
+class StudentProfileModel(BaseModel):
+    id: Optional[str] = Field(default=None, alias="_id")
+    name: str
+    email: str
+    grade: str
+    curriculum: str
+    stream: str
+    school: str
+    performance: str
+    financialSituation: str
+    personality: str
+    country: str
+    state: str
+    city: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda dt: dt.isoformat()
+        }
+
+
+class RoadmapData(BaseModel):
     readiness_score: int
     readiness_label: str
     total_duration: str
     macro_path: List[Milestone]
-    status: str = "under_admin_review"  # "pending_review" | "under_admin_review" | "published"
+    blind_spots: List[str]
+
+
+# Model for pending_paths collection
+class PendingPathModel(BaseModel):
+    id: Optional[str] = Field(default=None, alias="_id")
+    query: str
+    current_position: str
+    target_goal: str
+    profile: Optional[Dict[str, Any]] = None
+    roadmap_data: RoadmapData
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda dt: dt.isoformat()
+        }
+
+
+# Model for published_paths collection
+class PublishedPathModel(BaseModel):
+    id: Optional[str] = Field(default=None, alias="_id")
+    query: str
+    current_position: str
+    target_goal: str
+    profile: Optional[Dict[str, Any]] = None
+    roadmap_data: RoadmapData
+    published_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime
 
     class Config:
         populate_by_name = True

@@ -431,44 +431,6 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                   ))}
                 </div>
 
-                {/* Micro Steps (Tasks) */}
-                <div className="editor-steps-section">
-                  <div className="section-sublabel">Micro Tasks (Exactly 3)</div>
-                  
-                  {isReadOnly ? (
-                    <div className="steps-read-list">
-                      {milestone.micro_steps?.map((step, sIdx) => (
-                        <div key={sIdx} className="step-read-row">
-                          <span className="step-read-num">{sIdx + 1}</span>
-                          <span className="step-read-task">{step.task}</span>
-                          <span className="step-read-res-badge">{step.resource}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="steps-edit-list">
-                      {milestone.micro_steps?.map((step, sIdx) => (
-                        <div key={sIdx} className="step-edit-row">
-                          <div className="step-num">{sIdx + 1}</div>
-                          <input 
-                            type="text" 
-                            placeholder="Specific action item..."
-                            value={step.task} 
-                            onChange={e => handleMicroStepChange(mIdx, sIdx, "task", e.target.value)}
-                            className="task-input"
-                          />
-                          <input 
-                            type="text" 
-                            placeholder="Recommended resource..."
-                            value={step.resource} 
-                            onChange={e => handleMicroStepChange(mIdx, sIdx, "resource", e.target.value)}
-                            className="resource-input"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
 
                 {/* Marketplace Resources */}
                 <div className="editor-marketplace-section">

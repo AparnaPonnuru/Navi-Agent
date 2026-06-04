@@ -67,13 +67,13 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
     const initialTime = new Date().toLocaleTimeString();
     const startLogs = [
       { text: `🕒 [${initialTime}] Starting Career Path generation pipeline...`, type: "normal" },
-      { text: "➔ [Agent 1] Requesting blueprint from Llama-3 70B model...", type: "green" }
+      { text: "➔ [Agent 1] Requesting blueprint from Llama-3 8B model...", type: "green" }
     ];
     setTerminalLogs(startLogs);
     
     let currentProgress = 5;
     let stage = "blueprint_loading"; // "blueprint_loading" | "audit_loading" | "finalizing"
-    
+
     // Interval to simulate ticking up to caps
     const progressInterval = setInterval(() => {
       if (stage === "blueprint_loading") {

@@ -1,15 +1,15 @@
 import { useState } from "react";
 
 // ── localStorage helpers ──────────────────────────────────
-const USERS_KEY = "nv_users";
 const SESSION_KEY = "nv_session";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-function getUsers() {
-  try { return JSON.parse(localStorage.getItem(USERS_KEY) || "{}"); }
-  catch { return {}; }
+function getLocalProfile(email) {
+  try { return JSON.parse(localStorage.getItem(`nv_profile_${email}`) || "null"); }
+  catch { return null; }
 }
-function saveUsers(users) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+function saveLocalProfile(email, profile) {
+  localStorage.setItem(`nv_profile_${email}`, JSON.stringify(profile));
 }
 function getSession() {
   try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null"); }
@@ -41,8 +41,7 @@ const PROFILE_FIELDS = [
 export function useAuth() {
   const session = getSession();
   if (!session) return { user: null, profile: null };
-  const users = getUsers();
-  const profile = users[session] || null;
+  const profile = getLocalProfile(session);
   return { user: session, profile };
 }
 
@@ -60,23 +59,48 @@ export default function AuthFlow({ onAuthenticated }) {
   const [step, setStep]       = useState(0); // profile creation step
 
   // ── Login ──
-  function handleLogin() {
+  async function handleLogin() {
     const e = email.trim().toLowerCase();
     if (!e || !e.includes("@")) { setEmailError("Enter a valid email address"); return; }
-    const users = getUsers();
-    if (!users[e]) { setEmailError("No account found. Sign up first."); return; }
-    saveSession(e);
-    onAuthenticated(e, users[e]);
+    setEmailError("");
+    try {
+      const res = await fetch(`${API}/api/profile/${encodeURIComponent(e)}`);
+      if (res.status === 404) {
+        setEmailError("No account found. Sign up first.");
+        return;
+      }
+      if (!res.ok) throw new Error("Server error during login");
+      const profileData = await res.json();
+      saveSession(e);
+      saveLocalProfile(e, profileData);
+      onAuthenticated(e, profileData);
+    } catch (err) {
+      setEmailError("Unable to connect to the server. Please try again.");
+      console.error(err);
+    }
   }
 
   // ── Signup: check email ──
-  function handleSignup() {
+  async function handleSignup() {
     const e = email.trim().toLowerCase();
     if (!e || !e.includes("@")) { setEmailError("Enter a valid email address"); return; }
-    const users = getUsers();
-    if (users[e]) { setEmailError("Account already exists. Log in instead."); return; }
     setEmailError("");
-    setMode("profile");
+    try {
+      const res = await fetch(`${API}/api/profile/${encodeURIComponent(e)}`);
+      if (res.ok) {
+        setEmailError("Account already exists. Log in instead.");
+        return;
+      }
+      if (res.status === 404) {
+        setEmailError("");
+        setMode("profile");
+      } else {
+        throw new Error("Server error during signup check");
+      }
+    } catch (err) {
+      setEmailError("Unable to connect to the server. Please try again.");
+      console.error(err);
+    }
   }
 
   // ── Profile field change ──
@@ -92,21 +116,43 @@ export default function AuthFlow({ onAuthenticated }) {
     { title: "Your location",     fields: ["country","state","city"] },
   ];
 
-  function handleNextStep() {
+  async function handleNextStep() {
     const currentFields = STEPS[step].fields;
     const errors = {};
     currentFields.forEach(key => {
-      if (!profileData[key]?.trim()) errors[key] = "This field is required";
+      const val = profileData[key];
+      if (!val || (typeof val === "string" && !val.trim())) {
+        errors[key] = "This field is required";
+      }
     });
     if (Object.keys(errors).length) { setProfileErrors(errors); return; }
     if (step < STEPS.length - 1) { setStep(s => s + 1); return; }
-    // Final save
+    
+    // Final save to backend MongoDB
     const e = email.trim().toLowerCase();
-    const users = getUsers();
-    users[e] = { ...profileData, email: e, createdAt: Date.now() };
-    saveUsers(users);
-    saveSession(e);
-    onAuthenticated(e, users[e]);
+    const payload = {
+      ...profileData,
+      email: e
+    };
+    
+    try {
+      const res = await fetch(`${API}/api/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to save profile on server");
+      }
+      const savedProfile = await res.json();
+      saveSession(e);
+      saveLocalProfile(e, savedProfile);
+      onAuthenticated(e, savedProfile);
+    } catch (err) {
+      alert(`Error saving profile: ${err.message}`);
+      console.error(err);
+    }
   }
 
   // ── Render ──
