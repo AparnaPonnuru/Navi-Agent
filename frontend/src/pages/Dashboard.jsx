@@ -1,4 +1,5 @@
 import { useState } from "react";
+import './Dashboard.scss';
 import {
   IconArrowRight, IconBrain, IconNavigation, IconRoute, IconCheck,
 } from "./Icons";
