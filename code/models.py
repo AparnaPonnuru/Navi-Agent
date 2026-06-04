@@ -72,7 +72,7 @@ class StudentProfileModel(BaseModel):
     class Config:
         populate_by_name = True
         json_encoders = {
-            datetime: lambda dt: dt.isoformat()
+            datetime: lambda dt: dt.isoformat() + "Z" if not dt.tzinfo else dt.isoformat()
         }
 
 
@@ -97,7 +97,7 @@ class PendingPathModel(BaseModel):
     class Config:
         populate_by_name = True
         json_encoders = {
-            datetime: lambda dt: dt.isoformat()
+            datetime: lambda dt: dt.isoformat() + "Z" if not dt.tzinfo else dt.isoformat()
         }
 
 
@@ -115,5 +115,5 @@ class PublishedPathModel(BaseModel):
     class Config:
         populate_by_name = True
         json_encoders = {
-            datetime: lambda dt: dt.isoformat()
+            datetime: lambda dt: dt.isoformat() + "Z" if not dt.tzinfo else dt.isoformat()
         }

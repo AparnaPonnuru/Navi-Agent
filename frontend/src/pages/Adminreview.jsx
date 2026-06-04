@@ -36,14 +36,7 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
       if (!res.ok) throw new Error("Failed to fetch paths under review");
       const json = await res.json();
       setPathsQueue(json);
-      
-      // Proactively select the current session path if it exists
-      if (initialPathData && initialPathData.db_id && !selectedPath) {
-        const found = json.find(p => p.id === initialPathData.db_id);
-        if (found) {
-          selectPathForReview(found);
-        }
-      }
+      // Do not auto-select any path so that the admin queue is always shown first
     } catch (e) {
       setError("Cannot load admin review queue. Verify the backend is running.");
       console.error(e);

@@ -75,10 +75,22 @@ def serialize_mongo_doc(doc):
         return None
     doc["id"] = str(doc["_id"])
     del doc["_id"]
-    if "created_at" in doc and doc["created_at"]:
-        doc["created_at"] = doc["created_at"].isoformat()
-    if "updated_at" in doc and doc["updated_at"]:
-        doc["updated_at"] = doc["updated_at"].isoformat()
+    for field in ["created_at", "updated_at", "published_at"]:
+        if field in doc and doc[field]:
+            if hasattr(doc[field], "isoformat"):
+                val = doc[field].isoformat()
+                if not val.endswith("Z") and "+00:00" not in val:
+                    val += "Z"
+                doc[field] = val
+    if "profile" in doc and isinstance(doc["profile"], dict):
+        profile_dict = doc["profile"]
+        for field in ["created_at", "updated_at"]:
+            if field in profile_dict and profile_dict[field]:
+                if hasattr(profile_dict[field], "isoformat"):
+                    val = profile_dict[field].isoformat()
+                    if not val.endswith("Z") and "+00:00" not in val:
+                        val += "Z"
+                    profile_dict[field] = val
     return doc
 
 # ─── AGENT 1: BLUEPRINT GENERATOR PROMPT ──────────────────────────────────
@@ -1261,18 +1273,15 @@ async def update_path(path_id: str, req: UpdatePathRequest):
     
     if pending_doc:
         if req.status == "published":
-            # Migrate from pending to published
+            # Migrate from pending to published, retaining all custom fields (e.g. admin_notes, feedback, custom query metadata)
             published_doc = {
-                "query": pending_doc.get("query"),
-                "current_position": pending_doc.get("current_position"),
-                "target_goal": pending_doc.get("target_goal"),
-                "profile": pending_doc.get("profile"),
+                **pending_doc,
                 "roadmap_data": req.roadmap_data,
                 "status": "published",
-                "created_at": pending_doc.get("created_at") or datetime.datetime.utcnow(),
                 "published_at": datetime.datetime.utcnow()
             }
-            published_doc["_id"] = obj_id
+            if "updated_at" in published_doc:
+                del published_doc["updated_at"]
             await published_paths_collection.insert_one(published_doc)
             
             # Delete from pending_paths
