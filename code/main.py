@@ -3,9 +3,11 @@ import re
 import json
 import asyncio
 import datetime
+import time
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from groq import Groq, AsyncGroq
 from dotenv import load_dotenv
@@ -624,7 +626,7 @@ async def run_agent_1_blueprint(current: str, goal: str, profile: dict) -> dict:
     # If the daily token limit is exhausted, query_groq_json returns {}
     if not res or "macro_path" not in res:
         print("[Rate Limit Warning] Daily token limit exceeded. Serving board-calibrated fallback roadmap.")
-        # Try to call 70B model directly
+        # Try the larger model before falling back to the static mock.
         res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
         if not res or "macro_path" not in res:
             # Full lockout: serve high-fidelity static mock custom-built for CBSE/Cambridge
@@ -696,6 +698,90 @@ async def run_agent_4_marketplace_auditor(blueprint: dict, current: str, goal: s
     return res if isinstance(res, list) else []
 
 
+
+def build_agent_statuses(active_agent: str = None, completed_agents: list = None) -> dict:
+    completed_agents = completed_agents or []
+    statuses = {
+        "agent1": "pending",
+        "agent2": "pending",
+        "agent3": "pending",
+        "agent4": "pending",
+        "ready": "pending",
+    }
+    for agent in completed_agents:
+        statuses[agent] = "completed"
+    if active_agent:
+        statuses[active_agent] = "active"
+    return statuses
+
+
+def sse_payload(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+async def build_and_store_final_path(
+    blueprint: dict,
+    path_audit: dict,
+    steps_audit: list,
+    market_audit: list,
+    current: str,
+    goal: str,
+    profile: dict
+) -> dict:
+    final_macro_path = []
+    blueprint_milestones = blueprint.get("macro_path", [])
+
+    for i, orig_milestone in enumerate(blueprint_milestones):
+        m_id = orig_milestone.get("id", i + 1)
+        audited_step = next((m for m in steps_audit if m.get("id") == m_id), {})
+        audited_market = next((m.get("marketplace") for m in market_audit if m.get("id") == m_id), None)
+
+        merged_milestone = {
+            "id": m_id,
+            "title": audited_step.get("title") or orig_milestone.get("title", f"Milestone {m_id}"),
+            "duration": audited_step.get("duration") or orig_milestone.get("duration", "3 months"),
+            "description": audited_step.get("description") or orig_milestone.get("description", ""),
+            "learning_objectives": audited_step.get("learning_objectives") or orig_milestone.get("learning_objectives", []),
+            "macro_view": audited_step.get("macro_view") or orig_milestone.get("macro_view", ""),
+            "micro_view": audited_step.get("micro_view") or orig_milestone.get("micro_view", ""),
+            "nano_view": audited_step.get("nano_view") or orig_milestone.get("nano_view", ""),
+            "marketplace": audited_market or orig_milestone.get("marketplace") or {"macro_free": [], "micro_structured": [], "nano_expert": []},
+            "micro_steps": audited_step.get("micro_steps") or orig_milestone.get("micro_steps") or []
+        }
+        final_macro_path.append(merged_milestone)
+
+    final_json = {
+        "path_title": path_audit.get("path_title") or blueprint.get("path_title") or f"Academic Pathway to {goal}",
+        "path_description": path_audit.get("path_description") or blueprint.get("path_description") or f"Detailed strategy blueprint for achieving target goal: {goal}.",
+        "readiness_score": path_audit.get("readiness_score") or blueprint.get("readiness_score", 15),
+        "readiness_label": path_audit.get("readiness_label") or blueprint.get("readiness_label", "Standard Grade"),
+        "total_duration": blueprint.get("total_duration", "12 months"),
+        "macro_path": final_macro_path,
+        "blind_spots": path_audit.get("blind_spots") or blueprint.get("blind_spots") or []
+    }
+
+    name_tokens = build_name_patterns(profile, current)
+    if name_tokens:
+        print(f"[Sanitizer] Scrubbing personal name tokens: {name_tokens}")
+        final_json = recursive_sanitize(final_json, name_tokens)
+        print("[Sanitizer] Personal name sanitization complete.")
+
+    path_doc = {
+        "query": f"Current: {current}. Goal: {goal}.",
+        "current_position": current,
+        "target_goal": goal,
+        "profile": profile,
+        "roadmap_data": final_json,
+        "status": "under_admin_review",
+        "created_at": datetime.datetime.utcnow()
+    }
+
+    insert_result = await pending_paths_collection.insert_one(path_doc)
+    final_json["db_id"] = str(insert_result.inserted_id)
+    final_json["status"] = "under_admin_review"
+    print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
+    return final_json
+
 # ─── API ENDPOINTS ────────────────────────────────────────────────────────
 
 @app.post("/api/profile")
@@ -731,6 +817,108 @@ async def get_profile(email: str):
         raise HTTPException(status_code=404, detail="Profile not found")
     return serialize_mongo_doc(doc)
 
+
+@app.post("/api/path/stream")
+async def generate_path_stream(req: PathGenerationRequest):
+    current = req.current_position.strip()
+    goal = req.target_goal.strip()
+    profile = req.profile or {}
+
+    if not current or not goal:
+        raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
+
+    async def event_stream():
+        completed = []
+        started_at = time.perf_counter()
+        try:
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("agent1", completed),
+                "progress": 20,
+                "message": "Analyzing your profile..."
+            })
+            blueprint = await run_agent_1_blueprint(current, goal, profile)
+            completed.append("agent1")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses(None, completed),
+                "progress": 20,
+                "message": "Profile analysis complete."
+            })
+
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("agent2", completed),
+                "progress": 40,
+                "message": "Building your roadmap..."
+            })
+            try:
+                path_audit = await run_agent_2_path_auditor(blueprint, current, goal, profile)
+            except Exception as e:
+                print(f"Agent 2 Error: {e}")
+                path_audit = {}
+            completed.append("agent2")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses(None, completed),
+                "progress": 40,
+                "message": "Roadmap structure complete."
+            })
+
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("agent3", completed),
+                "progress": 60,
+                "message": "Refining milestones and checklists..."
+            })
+            try:
+                steps_audit = await run_agent_3_steps_auditor(blueprint, current, goal, profile)
+            except Exception as e:
+                print(f"Agent 3 Error: {e}")
+                steps_audit = []
+            completed.append("agent3")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses(None, completed),
+                "progress": 60,
+                "message": "Milestones and checklists complete."
+            })
+
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("agent4", completed),
+                "progress": 80,
+                "message": "Finding learning resources..."
+            })
+            try:
+                market_audit = await run_agent_4_marketplace_auditor(blueprint, current, goal, profile)
+            except Exception as e:
+                print(f"Agent 4 Error: {e}")
+                market_audit = []
+            completed.append("agent4")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses(None, completed),
+                "progress": 80,
+                "message": "Learning resources complete."
+            })
+
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("ready", completed),
+                "progress": 95,
+                "message": "Preparing final recommendations..."
+            })
+            final_json = await build_and_store_final_path(
+                blueprint, path_audit, steps_audit, market_audit, current, goal, profile
+            )
+            completed.append("ready")
+            elapsed = time.perf_counter() - started_at
+            print(f"[Audit API] Agent audit and cache completed in {elapsed:.2f} seconds.")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses(None, completed),
+                "progress": 100,
+                "message": "Your career path is ready!"
+            })
+            yield sse_payload("result", final_json)
+        except Exception as e:
+            print(f"[Streamed Path Error] {e}")
+            yield sse_payload("error", {
+                "message": "Path generation failed. Please try again."
+            })
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @app.post("/api/path")
 async def generate_path(req: PathGenerationRequest):

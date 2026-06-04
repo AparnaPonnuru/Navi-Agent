@@ -1,27 +1,25 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
-  IconArrowRight, IconBrain, IconBuilding, IconGlobe,
-  IconMap, IconNavigation, IconPackage, IconPin,
-  IconRoute, IconSearch, IconShoppingCart, IconTarget,
-  IconCheck, IconAlert,
+  IconArrowRight, IconBrain, IconNavigation, IconRoute, IconCheck,
 } from "./Icons";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-const EXAMPLES = [
-  { current: "Grade 11, CBSE Science, Hyderabad", goal: "Become a Data Scientist" },
-  { current: "Marketing executive, 3 years exp", goal: "Switch to Product Management" },
-  { current: "B.Tech CS final year, Bangalore", goal: "Become a Full Stack Developer" },
-  { current: "Working professional, no coding background", goal: "Break into AI/ML Engineering" },
-  { current: "Design student, final year", goal: "Become a UX Designer" },
+const LOADING_MSGS = [
+  "Analyzing your profile...",
+  "Building your roadmap...",
+  "Refining milestones and checklists...",
+  "Finding learning resources...",
+  "Preparing final recommendations...",
+  "Your career path is ready!",
 ];
 
-const LOADING_MSGS = [
-  "Mapping your journey...",
-  "Analyzing your profile...",
-  "Building your path...",
-  "Finding milestones...",
-  "Almost ready...",
+const WORKFLOW_STEPS = [
+  { key: "agent1", title: "Agent 1", message: "Analyzing your profile..." },
+  { key: "agent2", title: "Agent 2", message: "Building your roadmap..." },
+  { key: "agent3", title: "Agent 3", message: "Refining milestones and checklists..." },
+  { key: "agent4", title: "Agent 4", message: "Finding learning resources..." },
+  { key: "ready", title: "Path Ready", message: "Preparing final recommendations..." },
 ];
 
 const STEP_COLORS = [
@@ -43,12 +41,76 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState(null);
 
-  // New real-time staged progress states
+  // Progress follows completed backend stages, not elapsed time.
   const [loaderProgress, setLoaderProgress] = useState(0);
-  const [step1Status, setStep1Status] = useState("pending");
-  const [step2Status, setStep2Status] = useState("pending");
-  const [step3Status, setStep3Status] = useState("pending");
-  const [terminalLogs, setTerminalLogs] = useState([]);
+  const [workflowStatus, setWorkflowStatus] = useState({
+    agent1: "pending",
+    agent2: "pending",
+    agent3: "pending",
+    agent4: "pending",
+    ready: "pending",
+  });
+
+  function applyStatusEvent(data) {
+    if (data.statuses) setWorkflowStatus(data.statuses);
+    if (typeof data.progress === "number") setLoaderProgress(data.progress);
+    if (data.message) setLoadMsg(data.message);
+  }
+
+  function handleStreamEvent(eventType, eventData, resultRef) {
+    if (eventType === "status") {
+      applyStatusEvent(eventData);
+      return;
+    }
+    if (eventType === "result") {
+      resultRef.current = eventData;
+      return;
+    }
+    if (eventType === "error") {
+      throw new Error(eventData.message || "Path generation failed");
+    }
+  }
+
+  async function readPathStream(response) {
+    if (!response.body) throw new Error("Backend did not return a progress stream");
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const resultRef = { current: null };
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+
+      for (const rawEvent of events) {
+        const lines = rawEvent.split("\n");
+        const eventType = lines.find(line => line.startsWith("event:"))?.replace("event:", "").trim() || "message";
+        const dataLine = lines.find(line => line.startsWith("data:"));
+        if (!dataLine) continue;
+
+        const eventData = JSON.parse(dataLine.replace("data:", "").trim());
+        handleStreamEvent(eventType, eventData, resultRef);
+      }
+    }
+
+    if (buffer.trim()) {
+      const lines = buffer.split("\n");
+      const eventType = lines.find(line => line.startsWith("event:"))?.replace("event:", "").trim() || "message";
+      const dataLine = lines.find(line => line.startsWith("data:"));
+      if (dataLine) {
+        const eventData = JSON.parse(dataLine.replace("data:", "").trim());
+        handleStreamEvent(eventType, eventData, resultRef);
+      }
+    }
+
+    if (!resultRef.current) throw new Error("Path generation finished without returning a roadmap");
+    return resultRef.current;
+  }
 
   async function generate() {
     if (!current.trim() || !goal.trim()) return;
@@ -57,50 +119,22 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
     }
     setLoading(true);
     setError("");
-    
-    // Set initial loader state
-    setLoaderProgress(5);
-    setStep1Status("active");
-    setStep2Status("pending");
-    setStep3Status("pending");
-    
-    const initialTime = new Date().toLocaleTimeString();
-    const startLogs = [
-      { text: `🕒 [${initialTime}] Starting Career Path generation pipeline...`, type: "normal" },
-      { text: "➔ [Agent 1] Requesting blueprint from Llama-3 8B model...", type: "green" }
-    ];
-    setTerminalLogs(startLogs);
-    
-    let currentProgress = 5;
-    let stage = "blueprint_loading"; // "blueprint_loading" | "audit_loading" | "finalizing"
 
-    // Interval to simulate ticking up to caps
-    const progressInterval = setInterval(() => {
-      if (stage === "blueprint_loading") {
-        currentProgress = Math.min(48, currentProgress + Math.floor(Math.random() * 4 + 1));
-        setLoaderProgress(currentProgress);
-        setTerminalLogs(prev => {
-          if (prev.length === 2 && currentProgress > 20) {
-            return [...prev, { text: "➔ [Agent 1] Drafting initial 4-milestone roadmap...", type: "normal" }];
-          }
-          return prev;
-        });
-      } else if (stage === "audit_loading") {
-        currentProgress = Math.min(95, currentProgress + Math.floor(Math.random() * 3 + 1));
-        setLoaderProgress(currentProgress);
-      }
-    }, 200);
 
-    setLoadMsg("Mapping your journey...");
-    let msgIndex = 0;
-    const msgInterval = setInterval(() => {
-      msgIndex = (msgIndex + 1) % LOADING_MSGS.length;
-      setLoadMsg(LOADING_MSGS[msgIndex]);
-    }, 1800);
+    applyStatusEvent({
+      statuses: {
+      agent1: "active",
+      agent2: "pending",
+      agent3: "pending",
+      agent4: "pending",
+      ready: "pending",
+      },
+      progress: 20,
+      message: LOADING_MSGS[0],
+    });
 
     try {
-      // Stage 1: Fetch blueprint from backend (Agent 1)
-      const blueprintRes = await fetch(`${API}/api/path/blueprint`, {
+      const streamRes = await fetch(`${API}/api/path/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -109,82 +143,22 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
           profile: profile
         }),
       });
-      const blueprintData = await blueprintRes.json();
-      if (!blueprintRes.ok) throw new Error(blueprintData.detail || "Blueprint generation failed");
-      
-      // Update logs for Stage 1 completion
-      setTerminalLogs(prev => [
-        ...prev,
-        { text: "✓ [Agent 1] Blueprint successfully generated.", type: "green" },
-        { text: `🕒 [${new Date().toLocaleTimeString()}] Dispatched parallel auditing tasks to Agents 2, 3 & 4...`, type: "normal" },
-        { text: "➔ [Agent 2] Auditing overall path structure and readiness score...", type: "blue" },
-        { text: "➔ [Agent 3] Refinement of milestone descriptions and check-lists...", type: "blue" },
-        { text: "➔ [Agent 4] Validating marketplace recommendations and prices...", type: "blue" }
-      ]);
-      
-      // Advance to stage 2
-      stage = "audit_loading";
-      currentProgress = 50;
-      setLoaderProgress(50);
-      setStep1Status("completed");
-      setStep2Status("active");
+      if (!streamRes.ok) {
+        const errorData = await streamRes.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Path generation failed");
+      }
 
-      // Stage 2: Fetch audited/final roadmap (Agents 2, 3, 4)
-      const auditRes = await fetch(`${API}/api/path/audit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          blueprint: blueprintData,
-          current_position: current,
-          target_goal: goal,
-          profile: profile
-        }),
-      });
-      const finalData = await auditRes.json();
-      if (!auditRes.ok) throw new Error(finalData.detail || "Audit processing failed");
-
-      // Stage 3: Finalizing
-      stage = "finalizing";
-      setStep2Status("completed");
-      setStep3Status("active");
-      
-      setTerminalLogs(prev => [
-        ...prev,
-        { text: "✓ [Audit Pipeline] Verification and resources audit completed.", type: "green" },
-        { text: "➔ [Sanitizer] Scrubbing personal name tokens from descriptions...", type: "normal" }
-      ]);
-      setLoaderProgress(98);
-
-      // Add a slight delay for realistic processing stages
-      await new Promise(resolve => setTimeout(resolve, 600));
-      setTerminalLogs(prev => [
-        ...prev,
-        { text: "➔ [MongoDB] Caching finalized path document to Database...", type: "normal" }
-      ]);
-      setLoaderProgress(100);
-      setStep3Status("completed");
-      setTerminalLogs(prev => [
-        ...prev,
-        { text: "✓ [Pipeline] Job completed. Rendering career pathway map.", type: "green" }
-      ]);
-
-      // Brief pause at 100% so user can appreciate the success state
-      await new Promise(resolve => setTimeout(resolve, 800));
-      clearInterval(progressInterval);
-      clearInterval(msgInterval);
+      const finalData = await readPathStream(streamRes);
       setLoading(false);
       onPathGenerated(finalData, { current, goal });
 
     } catch (e) {
-      clearInterval(progressInterval);
-      clearInterval(msgInterval);
       setLoading(false);
       setError(e.message.includes("fetch")
         ? "Cannot connect to backend. Run: uvicorn main:app --reload --port 8000"
         : e.message);
     }
   }
-
   const steps = pathData?.macro_path || [];
 
   return (
@@ -295,8 +269,8 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                   <div className="loader-radar" />
                   <span className="loader-brain-icon"><IconBrain size={28} /></span>
                 </div>
-                <h3>Naaviverse Career Path Engine</h3>
-                <p>Collaborating multi-agent AI systems to build your tailored roadmap...</p>
+                <h3>Generating Your Career Path</h3>
+                <p>{loadMsg}</p>
               </div>
 
               {/* Progress bar */}
@@ -305,64 +279,33 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                 <span className="loader-progress-text">{loaderProgress}%</span>
               </div>
 
-              {/* Pipeline Steps */}
+              {/* Agent workflow */}
               <div className="loader-pipeline">
-                {/* Agent 1 */}
-                <div className={`loader-pipeline-step ${step1Status}`}>
-                  <div className="step-indicator">
-                    {step1Status === "completed" ? "✓" : step1Status === "active" ? <div className="spinner-inner" /> : ""}
-                  </div>
-                  <div className="step-content">
-                    <span className="step-title">Agent 1: Blueprint Generator</span>
-                    <span className="step-desc">Generating initial 4-stage milestones and structure.</span>
-                  </div>
-                </div>
-
-                {/* Agent 2, 3, 4 (Auditing) */}
-                <div className={`loader-pipeline-step ${step2Status}`}>
-                  <div className="step-indicator">
-                    {step2Status === "completed" ? "✓" : step2Status === "active" ? <div className="spinner-inner" /> : ""}
-                  </div>
-                  <div className="step-content">
-                    <span className="step-title">Agents 2, 3 & 4: Path & Resource Auditors</span>
-                    <span className="step-desc">Refining path, learning views, checklists, and matching marketplace items (running in parallel).</span>
-                  </div>
-                </div>
-
-                {/* Sanitizer & Cache */}
-                <div className={`loader-pipeline-step ${step3Status}`}>
-                  <div className="step-indicator">
-                    {step3Status === "completed" ? "✓" : step3Status === "active" ? <div className="spinner-inner" /> : ""}
-                  </div>
-                  <div className="step-content">
-                    <span className="step-title">Post-Processing & Storage</span>
-                    <span className="step-desc">Sanitizing personal names and caching roadmap to MongoDB.</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Terminal Logs Box */}
-              <div className="loader-terminal">
-                <div className="terminal-header">
-                  <span className="terminal-dot red" />
-                  <span className="terminal-dot yellow" />
-                  <span className="terminal-dot green" />
-                  <span className="terminal-title">Path Engine Logs</span>
-                </div>
-                <div className="terminal-body">
-                  {terminalLogs.map((log, idx) => (
-                    <div 
-                      key={idx} 
-                      className={`terminal-log-line font-mono ${
-                        log.type === "green" ? "green-text" : log.type === "blue" ? "blue-text" : ""
-                      }`}
-                    >
-                      {log.text}
+                {WORKFLOW_STEPS.map((step, index) => {
+                  const status = workflowStatus[step.key];
+                  return (
+                    <div key={step.key} className={`loader-pipeline-step ${status}`}>
+                      <div className="step-indicator">
+                        {status === "completed" ? <IconCheck size={14} /> : status === "active" ? <div className="spinner-inner" /> : index + 1}
+                      </div>
+                      <div className="step-content">
+                        <span className="step-title">{step.title}</span>
+                        <span className="step-desc">{step.message}</span>
+                      </div>
                     </div>
-                  ))}
-                  <div className="terminal-cursor" />
-                </div>
+                  );
+                })}
               </div>
+
+              {loaderProgress === 100 && (
+                <div className="loader-success">
+                  <div className="loader-success-icon"><IconCheck size={18} /></div>
+                  <div>
+                    <strong>Path Generated Successfully</strong>
+                    <span>Your personalized roadmap is ready to explore.</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -128,7 +128,7 @@ export default function App() {
         <div className="sidebar-brand" onClick={() => goTo("dashboard")}>
           <img src="/naavi_logo.png" alt="naavi logo" className="logo-image-sidebar" />
           <div className="sidebar-brand-copy">
-            <span className="logo-name">naavi</span>
+            <span className="logo-name">Naavi</span>
             <span className="logo-tag">AI Path Engine</span>
           </div>
         </div>
