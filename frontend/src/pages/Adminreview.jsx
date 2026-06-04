@@ -401,11 +401,11 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
             </div>
             {isReadOnly || !editingDetails ? (
               <div className="stats-read-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-                <div className="stat-read-item" style={{ gridColumn: "span 3", borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 12 }}>
+                <div className="stat-read-item" style={{ gridColumn: "span 3" }}>
                   <span>Pathway Title</span>
-                  <strong style={{ fontSize: 18 }}>{editedRoadmap.path_title || `Pathway to ${selectedPath.target_goal}`}</strong>
+                  <strong>{editedRoadmap.path_title || `Pathway to ${selectedPath.target_goal}`}</strong>
                 </div>
-                <div className="stat-read-item" style={{ gridColumn: "span 3", borderBottom: "1px solid var(--border)", paddingBottom: 12, marginBottom: 12 }}>
+                <div className="stat-read-item" style={{ gridColumn: "span 3" }}>
                   <span>Pathway Description</span>
                   <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text2)", lineHeight: 1.5, fontWeight: "normal" }}>
                     {editedRoadmap.path_description || "No description provided."}
@@ -417,11 +417,11 @@ export default function AdminReview({ pathData: initialPathData, userInput, prof
                 </div>
                 <div className="stat-read-item">
                   <span>Readiness Label</span>
-                  <strong>{editedRoadmap.readiness_label}</strong>
+                  <span>{editedRoadmap.readiness_label}</span>
                 </div>
                 <div className="stat-read-item">
                   <span>Total Duration</span>
-                  <strong>{editedRoadmap.total_duration}</strong>
+                  <span>{editedRoadmap.total_duration}</span>
                 </div>
               </div>
             ) : (
