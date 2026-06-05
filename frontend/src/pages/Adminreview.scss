@@ -1,6 +1,27 @@
 /* ── Admin Review Page Styles ─────────────────────────────── */
 
 /* ── Section action buttons ──────────────────────────────── */
+.btn-pdf-pill {
+  background-color: #6366f1;
+  color: #fff;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.btn-pdf-pill:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-pdf-pill:hover:not(:disabled) {
+  background-color: #4f54c2; /* slightly darker */
+}
+
 .btn-edit-section {
   padding: 6px 12px;
   font-size: 12px;
