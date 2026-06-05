@@ -131,12 +131,12 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
   "path_description": "A comprehensive pedagogical pathway designed to take a student from {current_position} to a target career or academic destination of {target_goal}.",
   "readiness_score": 15,
   "readiness_label": "High School Starter",
-  "total_duration": "12 months",
+  "total_duration": "<calculated total duration, e.g. '36 months' or '24 months' or '12 months'>",
   "macro_path": [
     {{
       "id": 1,
       "title": "<step/milestone title>",
-      "duration": "Months 1-3",
+      "duration": "<calculated step duration range, e.g. 'Months 1-4'>",
       "description": "<detailed step description (at least 3 to 4 comprehensive sentences) outlining exactly what academics, study plans, or profile goals to focus on during this step, why this is critical, and how it strategically prepares the student for {target_goal}>",
       "learning_objectives": [
         "<learning objective 1>",
@@ -169,7 +169,7 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
             "type": "<Course | Certification | Book | Bootcamp>",
             "cost": "<realistic cost>",
             "duration": "<duration>",
-            "value": "<value proposition>",
+            "value": "<value proposition for the micro view>",
             "next_step": "<specific action>",
             "tags": ["<tag>", "<tag>"]
           }},
@@ -178,7 +178,7 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
             "type": "<Course | Certification | Book | Bootcamp>",
             "cost": "<realistic cost>",
             "duration": "<duration>",
-            "value": "<value proposition>",
+            "value": "<value proposition for the micro view>",
             "next_step": "<specific action>",
             "tags": ["<tag>", "<tag>"]
           }}
@@ -212,14 +212,31 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
 }}
 
 Rules:
-- Exactly 4 macro milestones/steps in macro_path.
+- Calculate the total timeline required (in months/years) to reach the Target Career Goal from the Current Position. For example:
+  - If a student is currently in 10th grade (e.g. "10th CBSE") and the target is a top university (e.g. "Yale University"), calculate a 36-month timeline covering 10th, 11th, and 12th grades up to placement/admissions.
+  - If currently in 11th grade, calculate a 24-month timeline.
+  - If currently in 12th grade, calculate a 12-month timeline.
+- Determine the number of milestones/steps in `macro_path` dynamically based on the complexity of the target destination and calculated timeline. Typically:
+  - 36-month timeline: Generate 8 to 12 milestones to cover the progression comprehensively.
+  - 24-month timeline: Generate 6 to 8 milestones.
+  - 12-month timeline: Generate 4 to 6 milestones.
+- Ensure that the progression of milestones represents the pedagogical stages inspired by "Aryan's Pathway 2023":
+  - Early milestones must cover: choosing the right curriculum/subjects/streams based on passion/aptitude, researching schools, setting GPA targets (e.g., accomplishing 90%+ in board/school exams).
+  - Middle milestones must cover: internship selection & planning to acquire relevant skills, identifying and starting test prep modules (e.g., SAT, ACT, English proficiency like IELTS/TOEFL), identifying right mentors.
+  - Transition milestones must cover: planning transitions between academic grades, analyzing risks and gaps.
+  - Final milestones must cover: profile building, mock score iteration, university placement program registration, and completing college application dossiers.
+- For each milestone step, construct:
+  - `macro_view`: A 2-3 sentence strategic paragraph explaining the big-picture purpose of the milestone (aligned with Macro row from the Aryan's Pathway).
+  - `micro_view`: A 2-3 sentence strategic paragraph explaining the execution tasks, coursework, and deliverables (how to choose, how to execute, checklist task targets).
+  - `nano_view`: A 2-3 sentence strategic paragraph explaining the mentor guidance focus (personalized matching, expert diagnostics, feedback, cohort check-ins).
+- Distribute the calculated total duration logically across the steps. For example, distribute month ranges like "Months 1-3", "Months 4-6", etc., so they span the entire calculated duration of the pathway.
 - Exactly 3 micro_steps tasks per step.
 - Exactly 3 learning_objectives per step.
 - Exactly 2 macro_free, 2 micro_structured, and 2 nano_expert per step in the marketplace block.
 - Avoid repeated resource names. Suggest highly specific resources like freeCodeCamp, Coursera, MIT OCW, Khan Academy, specific textbooks.
 - Deeply differentiate based on profile grade, curriculum (CBSE vs. IB vs. University), financial budget, stream, personality type, and location.
 - Each step description MUST be a rich, detailed, multi-sentence paragraph (3-4 sentences). Do NOT provide short, generic, or single-sentence descriptions. Make them highly academic, pedagogical, and context-specific.
-- CRITICAL NAME BAN: NEVER mention the student's personal name (e.g. Sunkara, Chaitanya, Praneeth) or email or personal pronouns in any text fields (titles, descriptions, views, checklist tasks, or objectives). Focus purely on objective, academic instructions, and explain what the main academic use, objectives, and execution steps of the milestone are.
+- CRITICAL NAME BAN: NEVER mention the student's personal name (e.g. Sunkara, Chaitanya, Praneeth) or email or personal pronouns in any text fields (titles, descriptions, views, checklist tasks, or objectives). Focus purely on objective, academic instructions.
 """
 
 # ─── AGENT 2: PATH AUDIT AGENT PROMPT ────────────────────────────────────────
@@ -260,8 +277,8 @@ Audited Goals:
 - Student Current Position & Profile: {current_position} | {profile}
 
 Given this blueprint JSON containing steps and views, review and audit:
-1. Each step's "title" and "duration" (Ensure logical progression).
-2. Each step's "description" (Must be a rich, detailed, multi-sentence strategic paragraph of 3-4 sentences detailing the main academic utility).
+1. Each step's "title" and "duration" (Ensure logical progression, and MUST preserve the step's exact calculated month duration range from the blueprint JSON, e.g. "Months 1-9" or "Months 1-6" or "Months 1-3" exactly. Do NOT change these ranges to default values).
+2. Each step's "description" (Must be a rich, detailed, multi-sentence paragraph of 3-4 sentences detailing the main academic utility).
 3. The step's "learning_objectives" (Verify they align with target learning outcomes).
 4. The step's "macro_view" (Must be a rich 2-3 sentence paragraph clearly explaining the BIG PICTURE PURPOSE — the overarching academic goal this milestone advances and why it is a critical foundation in the roadmap).
 5. The step's "micro_view" (Must be a rich 2-3 sentence paragraph describing the PRECISE EXECUTION OUTPUT — the exact academic tasks, deliverables, and coursework the student must complete to finish this phase).
@@ -274,7 +291,7 @@ Output ONLY a valid JSON array of this structure:
   {{
     "id": 1,
     "title": "<audited step title>",
-    "duration": "<audited duration>",
+    "duration": "<preserve duration range from blueprint exactly, e.g., 'Months 1-9'>",
     "description": "<audited rich detailed multi-sentence description (3-4 sentences)>",
     "learning_objectives": [
       "<audited learning objective 1>",
@@ -290,7 +307,7 @@ Output ONLY a valid JSON array of this structure:
       {{"task": "<actionable task 3>", "resource": "<real specific resource>"}}
     ]
   }},
-  ... for all 4 steps ...
+  ... for all steps in the blueprint ...
 ]
 
 Blueprint JSON to Audit:
@@ -503,150 +520,250 @@ async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-inst
 
 # Pedagogical High-Fidelity Fallback Roadmap in case of a complete API lockout
 def get_fallback_mock_roadmap(current: str, goal: str, profile: dict) -> dict:
+    grade_str = str(profile.get("grade") or "").lower() or current.lower()
+    
+    # Aryan's Pathway structural mapping
+    if "10" in grade_str or "tenth" in grade_str:
+        total_duration = "36 months"
+        steps_configs = [
+            {
+                "id": 1,
+                "title": "Curriculum & Stream Assessment",
+                "duration": "Months 1-4",
+                "description": f"Choose the right academic curriculum and stream (CBSE, IB, Cambridge) based on passion, personality assessment, and aptitude for {goal}.",
+                "macro_view": "Set the overall course and pathway direction to optimize board and college readiness.",
+                "micro_view": "Take psychometric and passion assessments, research school offerings, and consult counselors.",
+                "nano_view": "Pair with a guidance counselor to finalize subject selection and map curriculum options."
+            },
+            {
+                "id": 2,
+                "title": "School Selection & Academic Targets",
+                "duration": "Months 5-8",
+                "description": "Establish target schools and set clear academic targets. Focus on setting study habits and foundation metrics.",
+                "macro_view": "Establish high-caliber academic environments and target standards required for global universities.",
+                "micro_view": "Select schools based on location, budget, and mentor support, and finalize a weekly study timeline.",
+                "nano_view": "Obtain mentor diagnostic feedback on academic preparation and school resources mapping."
+            },
+            {
+                "id": 3,
+                "title": "Grade 10 Board Achievement",
+                "duration": "Months 9-12",
+                "description": "Achieve 90%+ in 10th-grade board exams. Master core academic concepts and prepare comprehensive exam notes.",
+                "macro_view": "Build a stellar academic foundation that serves as the official transcript entry point.",
+                "micro_view": "Complete diagnostic mock board tests, analyze weak chapters, and compile summary revision booklets.",
+                "nano_view": "Conduct progress check-ins with top-scoring student cohorts and board subject specialists."
+            },
+            {
+                "id": 4,
+                "title": "Internship Planning & Skill Curation",
+                "duration": "Months 13-16",
+                "description": "Focus on selecting and executing introductory internships to acquire practical skills and discover interests.",
+                "macro_view": "Supplement theoretical classroom learning with real-world project work and corporate exposure.",
+                "micro_view": "Apply for short internships, shadow industry specialists, and compile project reports.",
+                "nano_view": "Work with internship coordinators to align tasks with career interests and get reviews on deliverables."
+            },
+            {
+                "id": 5,
+                "title": "Grade 11 Transition & Diagnostic Test Prep",
+                "duration": "Months 17-20",
+                "description": "Transition to 11th grade successfully. Initiate standardized test prep diagnostics (SAT/ACT/IELTS/TOEFL) and map timelines.",
+                "macro_view": "Ensure a smooth academic step-up while setting the baseline for international standardized tests.",
+                "micro_view": "Purchase target test prep guides, take diagnostic test sittings, and plan a test calendar.",
+                "nano_view": "Conduct a transition risk analysis with senior academic advisors and test prep mentors."
+            },
+            {
+                "id": 6,
+                "title": "Grade 11 Academics & Profile Rigor",
+                "duration": "Months 21-24",
+                "description": "Maintain a 90%+ GPA in 11th-grade coursework and begin constructing an extracurricular profile / personal project.",
+                "macro_view": "Establish continuous academic growth and distinctiveness through specialized personal projects.",
+                "micro_view": "Start a research paper draft or launch a community service initiative, keeping complete logs.",
+                "nano_view": "Engage a subject-matter expert to scope your personal project and pressure-test the outline."
+            },
+            {
+                "id": 7,
+                "title": "Standardized Test Score Curation",
+                "duration": "Months 25-28",
+                "description": "Prepare intensively for the SAT/ACT and English proficiency tests. Take official exams and aim for top-tier scores.",
+                "macro_view": "Differentiate your application with highly competitive standardized exam scores.",
+                "micro_view": "Complete 10 full-length practice tests, review mistakes, and sit for the official examinations.",
+                "nano_view": "Conduct mock score iterations and review test-taking strategies with specialized coaches."
+            },
+            {
+                "id": 8,
+                "title": "Grade 12 Placement & Counselor Mapping",
+                "duration": "Months 29-32",
+                "description": f"Identify mentors and target university lists. Map recommendation letters and begin drafting essays for {goal}.",
+                "macro_view": "Convert academic and profile success into a curated admissions package targeting top-tier destinations.",
+                "micro_view": "Select 8-10 target universities, coordinate with recommendation letter writers, and draft common app essays.",
+                "nano_view": "Align with admissions counselors on portal shortlists and receive developmental feedback on essay drafts."
+            },
+            {
+                "id": 9,
+                "title": "Application Submission & Placement Curation",
+                "duration": "Months 33-36",
+                "description": f"Submit premium application dossiers to {goal} and prepare for interviews, visas, and matriculation.",
+                "macro_view": "Complete the college pathway, validate placement, and finalize legal entry permits.",
+                "micro_view": "Submit all application portals, participate in mock interview prep, and compile visa paperwork.",
+                "nano_view": "Conduct final panel mock interviews and visa checklist reviews with international coordinators."
+            }
+        ]
+    elif "11" in grade_str or "eleventh" in grade_str:
+        total_duration = "24 months"
+        steps_configs = [
+            {
+                "id": 1,
+                "title": "Grade 11 Academic Curation & GPA Target",
+                "duration": "Months 1-4",
+                "description": "Establish stellar study schedules and targets. Focus on scoring 90%+ in school exams and mapping coursework.",
+                "macro_view": "Lay the baseline transcripts required for university admissions.",
+                "micro_view": "Attend extra academic support classes, compile weekly summaries, and track mock test scores.",
+                "nano_view": "Schedule advisor check-ins to review mid-term performance and flag curriculum risks."
+            },
+            {
+                "id": 2,
+                "title": "Skill Curation & Internship Selection",
+                "duration": "Months 5-8",
+                "description": "Select practical internships or projects to acquire industry skills and strengthen your profile.",
+                "macro_view": "Demonstrate real-world application of skills and initiative.",
+                "micro_view": "Draft a professional CV, apply to 3 target internships, and complete a showcase project.",
+                "nano_view": "Work with a career coach to select projects that align with your major interest."
+            },
+            {
+                "id": 3,
+                "title": "Standardized Test Prep Modules",
+                "duration": "Months 9-12",
+                "description": "Identify and focus on standardized test prep modules (SAT/ACT/IELTS). Map schedules and diagnostic metrics.",
+                "macro_view": "Prove academic readiness and language proficiency for international admissions.",
+                "micro_view": "Register on test portals, solve prep questions, and take diagnostic mock sittings.",
+                "nano_view": "Conduct test-taking technique diagnostics and identify sub-topic weaknesses with prep mentors."
+            },
+            {
+                "id": 4,
+                "title": "Mentor Mapping & Profile Rigor",
+                "duration": "Months 13-16",
+                "description": "Partner with a dedicated mentor to scope out personal projects, research papers, or community campaigns.",
+                "macro_view": "Highlight unique interests and intellectual depth beyond standard grades.",
+                "micro_view": "Develop a project repository, draft abstract outlines, and meet weekly project milestones.",
+                "nano_view": "Review drafts and source codes with expert mentors for validation and refinement."
+            },
+            {
+                "id": 5,
+                "title": "Grade 12 Transition & Shortlisting",
+                "duration": "Months 17-20",
+                "description": "Transition smoothly into Grade 12. Finalize university shortlists and begin college application essays.",
+                "macro_view": "Strategically select target institutions and draft compelling personal statements.",
+                "micro_view": "Finalize 8 target colleges, research specific essay prompts, and write initial drafts.",
+                "nano_view": "Receive feedback on essay story arcs and align shortlists with admissions counselors."
+            },
+            {
+                "id": 6,
+                "title": "Application Dossier & Placements",
+                "duration": "Months 21-24",
+                "description": f"Submit completed application dossiers to target destination: {goal}. Secure recommendations and handle visas.",
+                "macro_view": "Execute the final step of the pathway by submitting curated portfolios and finalizing placement.",
+                "micro_view": "Pay application fees, submit portals (Common App etc.), and compile visa documents.",
+                "nano_view": "Practice mock admissions interviews and undergo checklist verification with placements advisors."
+            }
+        ]
+    else:
+        total_duration = "12 months"
+        steps_configs = [
+            {
+                "id": 1,
+                "title": "Grade 12 Academic Target & Profile Review",
+                "duration": "Months 1-3",
+                "description": "Establish term-exam targets and conduct a thorough profile review to identify extracurricular gaps.",
+                "macro_view": "Ensure final high school transcripts meet competitive standards while identifying portfolio issues.",
+                "micro_view": "Write down grade objectives, list active projects, and note recommendations needed.",
+                "nano_view": "Conduct a portfolio analysis session with advisors to map outstanding targets."
+            },
+            {
+                "id": 2,
+                "title": "Test Score Curation & Finalization",
+                "duration": "Months 4-6",
+                "description": "Complete final official standardized test sittings. Focus on test prep iteration and maximizing scores.",
+                "macro_view": "Finalize competitive metrics for college portals.",
+                "micro_view": "Practice weak areas, sit for official SAT/ACT/IELTS/TOEFL exams, and request score reports.",
+                "nano_view": "Coordinate score reviews and submission strategy check-ins with test mentors."
+            },
+            {
+                "id": 3,
+                "title": "Profile Curation & Mentor Counsel",
+                "duration": "Months 7-9",
+                "description": "Connect with college mentors, draft letters of recommendation profiles, and write personal statements.",
+                "macro_view": "Draft highly persuasive stories that demonstrate your readiness for collegiate study.",
+                "micro_view": "Draft the main application essay, create resumes, and requests recommendation inputs.",
+                "nano_view": "Obtain structural and narrative feedback on essays from writing advisors."
+            },
+            {
+                "id": 4,
+                "title": "University Placements Submission",
+                "duration": "Months 10-11",
+                "description": f"Assemble and submit official application dossiers to {goal}. Double-check all transcript records.",
+                "macro_view": "Submit all credentials to target admissions committees without errors.",
+                "micro_view": "Complete university portal profiles, review transcripts, and submit portfolios.",
+                "nano_view": "Review application completeness checklist with counselor prior to final submission."
+            },
+            {
+                "id": 5,
+                "title": "Admissions Finalization & Visas",
+                "duration": "Month 12",
+                "description": "Review placement decisions, prepare for interviews, and complete visa and study permit documentation.",
+                "macro_view": "Transition smoothly from high school applicant to university-matriculated student.",
+                "micro_view": "Attend mock interviews, review visa documents, and pay enrollment deposits.",
+                "nano_view": "Participate in pre-departure briefings and mock visa interview check-ins."
+            }
+        ]
+
+    # Map the configurations to high-fidelity milestone structures
+    macro_path = []
+    for cfg in steps_configs:
+        macro_path.append({
+            "id": cfg["id"],
+            "title": cfg["title"],
+            "duration": cfg["duration"],
+            "description": cfg["description"],
+            "learning_objectives": [
+                f"Understand the requirements and targets of the {cfg['title']} phase.",
+                f"Execute the micro execution steps and checklist tasks for this milestone.",
+                f"Engage in mentor reviews and peer feedback to confirm phase readiness."
+            ],
+            "macro_view": cfg["macro_view"],
+            "micro_view": cfg["micro_view"],
+            "nano_view": cfg["nano_view"],
+            "marketplace": {
+                "macro_free": [
+                    {"name": "Khan Academy Foundations", "type": "Free course", "why": "Builds fundamental insights.", "next_step": "Enroll and complete introductory units.", "tags": ["foundations", "academics"]},
+                    {"name": "YouTube College Admissions Guide", "type": "YouTube", "why": "Explains timeline and milestones.", "next_step": "Watch target playlists.", "tags": ["admissions", "planning"]}
+                ],
+                "micro_structured": [
+                    {"name": "Coursera Academic Prep Spec", "type": "Course", "cost": "Free to Audit / $49", "duration": "4 weeks", "value": "Teaches critical subject-level skills.", "next_step": "Enroll today", "tags": ["skills", "prep"]},
+                    {"name": "Official Study Prep Guide", "type": "Book", "cost": "$25", "duration": "Self-paced", "value": "Provides essential practice exercises.", "next_step": "Purchase resource", "tags": ["prep", "study"]}
+                ],
+                "nano_expert": [
+                    {"name": "Naavi Academic Advisor", "type": "Mentor", "price": "Included", "session_details": "1-on-1 session", "expected_outcomes": "Profile mapping and transition plan validation.", "tags": ["1on1", "guidance"]},
+                    {"name": "Naavi Cohort Review", "type": "Expert review", "price": "Included", "session_details": "Review portal", "expected_outcomes": "Detailed output review and checklist rating.", "tags": ["review", "feedback"]}
+                ]
+            },
+            "micro_steps": [
+                {"task": f"Define and document goals for the {cfg['title']} phase", "resource": "Google Docs / Notion"},
+                {"task": f"Complete diagnostic sittings or task execution for {cfg['title']}", "resource": "Practice Portals"},
+                {"task": f"Review execution output with mentor or advisor", "resource": "Naavi Platform"}
+            ]
+        })
+
     return {
         "path_title": f"Academic Pathway to {goal}",
         "path_description": f"A comprehensive pedagogical blueprint designed to take a student from {current} to the target academic goal: {goal}.",
         "readiness_score": 30,
         "readiness_label": "Early Starter",
-        "total_duration": "12 months",
+        "total_duration": total_duration,
         "blind_spots": [
             "Lacks formal international exposure - needs IELTS/SAT preparation.",
             "Needs structured extracurricular profile development for university entrance."
         ],
-        "macro_path": [
-            {
-                "id": 1,
-                "title": "Foundation and Profile Architecture",
-                "duration": "Months 1-3",
-                "description": f"Focus on core curriculum and start profile planning for {goal}.",
-                "learning_objectives": [
-                    "Establish a solid intellectual foundation in core academic subjects.",
-                    "Execute initial SAT/ACT/IELTS diagnostic assessments.",
-                    "Draft the strategic academic roadmap and goal setting."
-                ],
-                "macro_view": "Lay the intellectual and strategic foundation for target admissions.",
-                "micro_view": "Establish excellent marks in core subjects and draft a portfolio outline.",
-                "nano_view": "Mentorship should focus on diagnostic assessments and target setting.",
-                "marketplace": {
-                    "macro_free": [
-                        {"name": "Khan Academy NCERT Prep", "type": "Free course", "why": "Builds solid fundamentals.", "next_step": "Complete 3 modules weekly.", "tags": ["academics", "foundations"]},
-                        {"name": "YouTube - International Admissions Guide", "type": "YouTube", "why": "Explains timeline.", "next_step": "Watch admissions overview video.", "tags": ["admissions", "timeline"]}
-                    ],
-                    "micro_structured": [
-                        {"name": "Coursera Academic Writing", "type": "Course", "cost": "Free to Audit", "duration": "4 weeks", "value": "Teaches university essay style.", "next_step": "Enroll today", "tags": ["writing", "skills"]},
-                        {"name": "SAT Prep Official Guide", "type": "Book", "cost": "$25", "duration": "Self-paced", "value": "Essential practice tests.", "next_step": "Purchase on Amazon", "tags": ["SAT", "prep"]}
-                    ],
-                    "nano_expert": [
-                        {"name": "Naavi Academic Mentor", "type": "Mentor", "price": "Included", "session_details": "1-on-1 session", "expected_outcomes": "Profile roadmapping and gap analysis.", "tags": ["1on1", "guidance"]},
-                        {"name": "Naavi Essay Advisor", "type": "Expert review", "price": "Included", "session_details": "Review portal", "expected_outcomes": "Personal statement review.", "tags": ["essay", "curation"]}
-                    ]
-                },
-                "micro_steps": [
-                    {"task": "Complete diagnostic mock academic test", "resource": "Khan Academy"},
-                    {"task": "Draft initial 1-page personal profile essay", "resource": "Google Docs"},
-                    {"task": "Register for SAT/ACT test window calendar", "resource": "CollegeBoard"}
-                ]
-            },
-            {
-                "id": 2,
-                "title": "Bridging Regional Gaps",
-                "duration": "Months 4-6",
-                "description": "Engage in extracurricular enhancements and academic bridging exams.",
-                "learning_objectives": [
-                    "Formulate a structured extracurricular profile with targeted projects.",
-                    "Bridge subject gaps with advanced subject masterclasses.",
-                    "Initiate independent academic study and secondary diagnostics."
-                ],
-                "macro_view": "Target global admissions rigor by proving high-level aptitude.",
-                "micro_view": "Initiate personal academic project and enroll in AP exams if applicable.",
-                "nano_view": "Mentorship should focus on independent study skills and research methods.",
-                "marketplace": {
-                    "macro_free": [
-                        {"name": "MIT OpenCourseWare Intro Lectures", "type": "Free course", "why": "Experience collegiate depth.", "next_step": "Watch first 5 lecture units.", "tags": ["MIT", "academic"]},
-                        {"name": "GitHub Open Source projects", "type": "Community", "why": "Collaborative project building.", "next_step": "Find a beginner issue to patch.", "tags": ["open-source", "coding"]}
-                    ],
-                    "micro_structured": [
-                        {"name": "Udemy Subject Masterclass", "type": "Course", "cost": "$15", "duration": "12 hours", "value": "Advanced topic deep-dives.", "next_step": "Buy during discount window", "tags": ["mastery", "skills"]},
-                        {"name": "Princeton Review Prep Book", "type": "Book", "cost": "$30", "duration": "Self-paced", "value": "Great question bank.", "next_step": "Buy print version", "tags": ["prep", "AP"]}
-                    ],
-                    "nano_expert": [
-                        {"name": "Naavi Subject Specialist", "type": "Coaching", "price": "Included", "session_details": "Weekly checkins", "expected_outcomes": "Advanced academic support.", "tags": ["subject", "tutoring"]},
-                        {"name": "Naavi ExtraCurricular Coach", "type": "Mentor", "price": "Included", "session_details": "1-on-1 session", "expected_outcomes": "Project scoping and feedback.", "tags": ["projects", "mentorship"]}
-                    ]
-                },
-                "micro_steps": [
-                    {"task": "Start a personal project repository or research paper draft", "resource": "GitHub/Google Scholar"},
-                    {"task": "Enroll in and begin Advanced Placement (AP) preparation", "resource": "AP Central"},
-                    {"task": "Take a diagnostic English proficiency test", "resource": "IELTS/TOEFL Practice"}
-                ]
-            },
-            {
-                "id": 3,
-                "title": "Extracurricular Profile Rigor",
-                "duration": "Months 7-9",
-                "description": "Solidify the application profile with projects, contests, and papers.",
-                "learning_objectives": [
-                    "Publish or finalize independent research/projects.",
-                    "Compile outstanding letters of recommendation and credentials.",
-                    "Achieve targeted official scores on English proficiency tests."
-                ],
-                "macro_view": "Differentiate from other applicants through tangible accomplishments.",
-                "micro_view": "Complete academic projects and request recommendation letters.",
-                "nano_view": "Mentorship should focus on reference letters and essay fine-tuning.",
-                "marketplace": {
-                    "macro_free": [
-                        {"name": "Overleaf LaTeX Editor", "type": "Docs", "why": "Format academic publications.", "next_step": "Create a free student account.", "tags": ["academic", "LaTeX"]},
-                        {"name": "LinkedIn Student Groups", "type": "Community", "why": "Networking with alumni.", "next_step": "Connect with 5 target school alumni.", "tags": ["networking", "social"]}
-                    ],
-                    "micro_structured": [
-                        {"name": "IELTS Official Practice Materials", "type": "Certification", "cost": "$40", "duration": "2 weeks", "value": "Best official practice.", "next_step": "Book standard test slot", "tags": ["English", "IELTS"]},
-                        {"name": "Coursera Data Analytics Spec", "type": "Course", "cost": "$49", "duration": "6 weeks", "value": "Adds premium tech badge to CV.", "next_step": "Enroll on Coursera", "tags": ["skills", "CV"]}
-                    ],
-                    "nano_expert": [
-                        {"name": "Naavi Admissions Counselor", "type": "Coaching", "price": "Included", "session_details": "Review session", "expected_outcomes": "Admissions strategy alignment.", "tags": ["counselor", "college"]},
-                        {"name": "Naavi Project Reviewer", "type": "Expert review", "price": "Included", "session_details": "Video report", "expected_outcomes": "Complete portfolio critique.", "tags": ["critique", "expert"]}
-                    ]
-                },
-                "micro_steps": [
-                    {"task": "Finalize draft of research paper or personal project code", "resource": "Overleaf / GitHub"},
-                    {"task": "Draft list of recommenders and request recommendation letters", "resource": "School/College Faculty"},
-                    {"task": "Complete official IELTS/TOEFL standard examination", "resource": "British Council / ETS"}
-                ]
-            },
-            {
-                "id": 4,
-                "title": "Application Submission & Curation",
-                "duration": "Months 10-12",
-                "description": f"Submit premium applications to target destination: {goal}.",
-                "learning_objectives": [
-                    "Submit error-free Common App or university dossiers.",
-                    "Ace academic and admissions committee interviews.",
-                    "Secure entry study permits and visas successfully."
-                ],
-                "macro_view": "Successfully transition from prep to active matriculation.",
-                "micro_view": "Submit all application portals and prepare for academic interviews.",
-                "nano_view": "Mentorship should focus on mock interviews and visa preparations.",
-                "marketplace": {
-                    "macro_free": [
-                        {"name": "Common App Admissions Guides", "type": "Docs", "why": "Official platform walkthroughs.", "next_step": "Review submission checklist.", "tags": ["admissions", "portal"]},
-                        {"name": "YouTube Mock Admissions Interviews", "type": "YouTube", "why": "Understand expectations.", "next_step": "Watch 3 mock interviews.", "tags": ["interview", "prep"]}
-                    ],
-                    "micro_structured": [
-                        {"name": "Visa Application Fee", "type": "Certification", "cost": "Variable", "duration": "4 weeks", "value": "Required for international entry.", "next_step": "Pay on portal", "tags": ["visa", "process"]},
-                        {"name": "Target School Application Fee", "type": "Bootcamp", "cost": "$75", "duration": "Immediate", "value": "Submits application dossier.", "next_step": "Pay fee on submission", "tags": ["submission", "dossier"]}
-                    ],
-                    "nano_expert": [
-                        {"name": "Naavi Interview Coach", "type": "Coaching", "price": "Included", "session_details": "Mock interviews", "expected_outcomes": "Complete interview confidence.", "tags": ["interview", "mock"]},
-                        {"name": "Naavi Visa Counselor", "type": "Coaching", "price": "Included", "session_details": "Document check", "expected_outcomes": "Visa document checklist approval.", "tags": ["visa", "counselor"]}
-                    ]
-                },
-                "micro_steps": [
-                    {"task": "Submit completed Common App or direct university application dossiers", "resource": "Admissions Portal"},
-                    {"task": "Participate in admissions panel mock interviews and direct interviews", "resource": "Zoom / Admissions Panel"},
-                    {"task": "Compile and file visa entry and study permit documents", "resource": "Immigration Portal"}
-                ]
-            }
-        ]
+        "macro_path": macro_path
     }
 
 # Specialized Audit Tasks
