@@ -294,9 +294,9 @@ export default function AuthFlow({ onAuthenticated }) {
           </button>
         </div>
 
-        <p className="auth-footnote">
+        {/* <p className="auth-footnote">
           No password needed — your data stays in this browser only.
-        </p>
+        </p> */}
       </div>
 
       <div className="auth-visual">
