@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import './Dashboard.scss';
 import {
   IconArrowRight, IconBrain, IconNavigation, IconRoute, IconCheck,
@@ -34,13 +34,109 @@ function getProfileValue(profile, key) {
   return profile?.[key]?.trim?.() || profile?.[key] || "Not provided";
 }
 
-export default function Dashboard({ profile, pathData, userInput, initialCurrent = "", onPathGenerated, onStepClick, onGenerationStart }) {
+function analyzeGoalParts(goalText) {
+  if (!goalText || !goalText.trim()) {
+    return {
+      program: "",
+      university: "",
+      country: "",
+      missing: ["program", "university", "country"]
+    };
+  }
+
+  // Split by dot or middle dot
+  const rawParts = goalText.split(/[•.]+/).map(p => p.trim()).filter(Boolean);
+
+  let program = "";
+  let university = "";
+  let country = "";
+
+  const countryKeywords = [
+    "usa", "us", "uk", "united states", "united kingdom", "india", "canada",
+    "germany", "australia", "singapore", "france", "japan", "switzerland",
+    "netherlands", "sweden", "italy", "spain", "china", "hong kong", "ireland", "new zealand"
+  ];
+
+  const universityKeywords = [
+    "university", "college", "uni", "institute", "school", "tech", "iit",
+    "mit", "yale", "stanford", "harvard", "oxford", "cambridge", "princeton",
+    "columbia", "cornell", "caltech", "berkeley", "ucla", "nyu", "hec", "bits"
+  ];
+
+  const isCountry = (str) => {
+    const s = str.toLowerCase();
+    return countryKeywords.includes(s) || s.length === 2 || s.length === 3;
+  };
+
+  const isUniversity = (str) => {
+    const s = str.toLowerCase();
+    return universityKeywords.some(keyword => s.includes(keyword));
+  };
+
+  if (rawParts.length === 1) {
+    const part = rawParts[0];
+    if (isUniversity(part)) {
+      university = part;
+    } else if (isCountry(part)) {
+      country = part;
+    } else {
+      program = part;
+    }
+  } else if (rawParts.length === 2) {
+    const part1 = rawParts[0];
+    const part2 = rawParts[1];
+
+    if (isCountry(part2)) {
+      country = part2;
+      if (isUniversity(part1)) {
+        university = part1;
+      } else {
+        program = part1;
+      }
+    } else if (isUniversity(part1)) {
+      university = part1;
+      if (isCountry(part2)) {
+        country = part2;
+      } else {
+        program = part2;
+      }
+    } else if (isUniversity(part2)) {
+      university = part2;
+      program = part1;
+    } else {
+      program = part1;
+      university = part2;
+    }
+  } else if (rawParts.length >= 3) {
+    program = rawParts[0];
+    university = rawParts[1];
+    country = rawParts[2];
+  }
+
+  const missing = [];
+  if (!program) missing.push("program");
+  if (!university) missing.push("university");
+  if (!country) missing.push("country");
+
+  return { program, university, country, missing };
+}
+
+export default function Dashboard({ profile, pathData, userInput, initialCurrent = "", onPathGenerated, onStepClick, onGenerationStart, onProfileUpdated }) {
   const [current, setCurrent] = useState(initialCurrent);
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState(null);
+  const [refinePrompt, setRefinePrompt] = useState("");
+
+  useEffect(() => {
+    setCurrent(initialCurrent);
+  }, [initialCurrent]);
+
+  const goalAnalysis = analyzeGoalParts(goal);
+  const isGoalValid = goal.trim() !== "" && goalAnalysis.missing.length === 0;
+  const missingFieldsText = goalAnalysis.missing.join(", ").replace(/, ([^,]*)$/, ' and $1');
 
   // Progress follows completed backend stages, not elapsed time.
   const [loaderProgress, setLoaderProgress] = useState(0);
@@ -113,8 +209,9 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
     return resultRef.current;
   }
 
-  async function generate() {
-    if (!current.trim() || !goal.trim()) return;
+  async function generate(customPrompt = "") {
+    const promptText = typeof customPrompt === "string" ? customPrompt : "";
+    if (!current.trim() || !isGoalValid) return;
     if (onGenerationStart) {
       onGenerationStart({ current, goal });
     }
@@ -124,14 +221,14 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
 
     applyStatusEvent({
       statuses: {
-      agent1: "active",
-      agent2: "pending",
-      agent3: "pending",
-      agent4: "pending",
-      ready: "pending",
+        agent1: "active",
+        agent2: "pending",
+        agent3: "pending",
+        agent4: "pending",
+        ready: "pending",
       },
       progress: 20,
-      message: LOADING_MSGS[0],
+      message: promptText ? "Refining pathway..." : LOADING_MSGS[0],
     });
 
     try {
@@ -141,7 +238,9 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
         body: JSON.stringify({
           current_position: current,
           target_goal: goal,
-          profile: profile
+          profile: profile,
+          refine_prompt: promptText || null,
+          existing_roadmap: promptText ? pathData : null
         }),
       });
       if (!streamRes.ok) {
@@ -152,6 +251,9 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
       const finalData = await readPathStream(streamRes);
       setLoading(false);
       onPathGenerated(finalData, { current, goal });
+      if (promptText) {
+        setRefinePrompt("");
+      }
 
     } catch (e) {
       setLoading(false);
@@ -160,6 +262,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
         : e.message);
     }
   }
+
   const steps = pathData?.macro_path || [];
 
   return (
@@ -195,19 +298,63 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
             <textarea
               className="db-textarea"
               rows={3}
-              placeholder="e.g. Become a Civil Engineer at L&T"
+              placeholder="Program • University • Country"
               value={goal}
-              onChange={e => setGoal(e.target.value)}
+              onChange={e => {
+                let val = e.target.value;
+                // Replace dot with middle dot, avoiding decimals
+                let formatted = val.replace(/(?<!\d)\.(?!\d)/g, ' • ');
+                // Avoid double middle dots
+                formatted = formatted.replace(/\s*•\s*•\s*/g, ' • ');
+                setGoal(formatted);
+              }}
               disabled={loading}
-              onKeyDown={e => e.key === "Enter" && e.ctrlKey && generate()}
+              onKeyDown={e => e.key === "Enter" && e.ctrlKey && isGoalValid && generate()}
             />
+
+            {/* Naavi Agent Goal Validation Widget */}
+            <div className={`db-agent-validation ${isGoalValid ? 'valid' : goal.trim() ? 'invalid' : 'empty'}`}>
+              <div className="db-agent-avatar">
+                <div className="db-agent-pulse-ring" />
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v2a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                  <path d="M18 8a3 3 0 0 0-3-3h-1.5M6 8a3 3 0 0 1 3-3h1.5" />
+                  <rect x="4" y="8" width="16" height="12" rx="2" />
+                  <circle cx="9" cy="13" r="1.2" fill="currentColor" />
+                  <circle cx="15" cy="13" r="1.2" fill="currentColor" />
+                  <path d="M9 17h6" />
+                </svg>
+              </div>
+              <div className="db-agent-body">
+                <span className="db-agent-title">Naavi Agent</span>
+                <p className="db-agent-text">
+                  {goal.trim() === "" ? (
+                    <>Please enter your goal using the format: <strong>Program • University • Country</strong></>
+                  ) : goalAnalysis.missing.length > 0 ? (
+                    <>You missed the <strong>{missingFieldsText}</strong>. Please include {goalAnalysis.missing.length === 1 ? 'it' : 'them'} (e.g. {
+                      goalAnalysis.missing.includes("program") ? "Computer Science" : ""
+                    }{
+                        goalAnalysis.missing.includes("program") && goalAnalysis.missing.includes("university") ? " • " : ""
+                      }{
+                        goalAnalysis.missing.includes("university") ? "Yale University" : ""
+                      }{
+                        (goalAnalysis.missing.includes("program") || goalAnalysis.missing.includes("university")) && goalAnalysis.missing.includes("country") ? " • " : ""
+                      }{
+                        goalAnalysis.missing.includes("country") ? "USA" : ""
+                      }).</>
+                  ) : (
+                    <>Goal format is perfect! Click <strong>Find My Path</strong> to continue.</>
+                  )}
+                </p>
+              </div>
+            </div>
 
             {error && <div className="db-error">{error}</div>}
 
             <button
               className="db-generate-btn"
               onClick={generate}
-              disabled={loading || !current.trim() || !goal.trim()}
+              disabled={loading || !current.trim() || !isGoalValid}
             >
               {loading ? (
                 <span className="db-loading-inner">
@@ -220,28 +367,38 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
             </button>
           </div>
 
-          {/* Profile signals */}
-          <div className="db-profile-card">
-            <div className="db-profile-head">
-              <span className="db-section-label">Profile signals</span>
-              <span className="db-auto-badge">Auto-loaded</span>
-            </div>
-            <div className="db-profile-grid">
-              {[
-                { label: "Grade", value: getProfileValue(profile, "grade") },
-                { label: "Curriculum", value: getProfileValue(profile, "curriculum") },
-                { label: "Stream", value: getProfileValue(profile, "stream") },
-                { label: "Performance", value: getProfileValue(profile, "performance") },
-                { label: "Personality", value: getProfileValue(profile, "personality") },
-                { label: "Location", value: [profile?.city, profile?.state].filter(Boolean).join(", ") || "Not set" },
-              ].map((f, i) => (
-                <div key={i} className="db-profile-item">
-                  <span className="db-profile-item-label">{f.label}</span>
-                  <span className="db-profile-item-value">{f.value}</span>
+          {/* Refine with AI Agent Card */}
+          {pathData && !loading && (
+            <div className="db-refine-card card">
+              <div className="db-refine-head">
+                <div className="db-refine-head-left">
+                  <div className="db-agent-avatar small active" style={{ animation: "none", width: 22, height: 22 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a3 3 0 0 0-3 3v2a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                      <rect x="4" y="8" width="16" height="12" rx="2" />
+                      <path d="M9 17h6" />
+                    </svg>
+                  </div>
+                  <span className="db-refine-title">Refine with Naavi Agent</span>
                 </div>
-              ))}
+              </div>
+              <textarea
+                className="db-textarea"
+                rows={3}
+                placeholder="Describe required changes..."
+                value={refinePrompt}
+                onChange={e => setRefinePrompt(e.target.value)}
+                disabled={loading}
+              />
+              <button
+                className="db-refine-btn"
+                onClick={() => generate(refinePrompt)}
+                disabled={loading || !refinePrompt.trim()}
+              >
+                <IconNavigation size={14} /> Refine Pathway
+              </button>
             </div>
-          </div>
+          )}
 
 
 

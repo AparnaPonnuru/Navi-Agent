@@ -55,6 +55,8 @@ class PathGenerationRequest(BaseModel):
     current_position: str
     target_goal: str
     profile: Optional[dict] = None
+    refine_prompt: Optional[str] = None
+    existing_roadmap: Optional[dict] = None
 
 class PathAuditRequest(BaseModel):
     blueprint: dict
@@ -212,14 +214,15 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
 }}
 
 Rules:
-- Calculate the total timeline required (in months/years) to reach the Target Career Goal from the Current Position. For example:
-  - If a student is currently in 10th grade (e.g. "10th CBSE") and the target is a top university (e.g. "Yale University"), calculate a 36-month timeline covering 10th, 11th, and 12th grades up to placement/admissions.
-  - If currently in 11th grade, calculate a 24-month timeline.
-  - If currently in 12th grade, calculate a 12-month timeline.
-- Determine the number of milestones/steps in `macro_path` dynamically based on the complexity of the target destination and calculated timeline. Typically:
-  - 36-month timeline: Generate 8 to 12 milestones to cover the progression comprehensively.
-  - 24-month timeline: Generate 6 to 8 milestones.
-  - 12-month timeline: Generate 4 to 6 milestones.
+- CRITICAL TIMELINE CONSTRAINT: You MUST calculate the total timeline duration strictly based on the student's current grade from the profile details:
+  - If the student is in 10th grade (or profile grade contains "10"), set `total_duration` to EXACTLY "36 months" and distribute steps across Months 1-36.
+  - If the student is in 11th grade (or profile grade contains "11"), set `total_duration` to EXACTLY "24 months" and distribute steps across Months 1-24.
+  - If the student is in 12th grade (or profile grade contains "12"), set `total_duration` to EXACTLY "12 months" and distribute steps across Months 1-12.
+  - If the student is in university / college / other, set `total_duration` to "12 months" or "24 months" based on goal complexity.
+  - You MUST strictly follow this mapping. Do NOT default to "24 months" if the student is in 12th grade.
+- Determine the number of milestones/steps in `macro_path` dynamically based on the complexity of the target destination and calculated timeline.
+  - CRITICAL STEP COUNT RULE: You MUST generate a detailed, comprehensive roadmap. For a 24-month or 36-month timeline, you MUST generate at least 8 to 12 distinct milestones/steps in the `macro_path` array. For a 12-month timeline, you MUST generate at least 6 to 8 distinct milestones/steps.
+  - DO NOT restrict or default the pathway to exactly 4 steps. A 4-step path is insufficient to cover a student's career transition and is strictly forbidden.
 - Ensure that the progression of milestones represents the pedagogical stages inspired by "Aryan's Pathway 2023":
   - Early milestones must cover: choosing the right curriculum/subjects/streams based on passion/aptitude, researching schools, setting GPA targets (e.g., accomplishing 90%+ in board/school exams).
   - Middle milestones must cover: internship selection & planning to acquire relevant skills, identifying and starting test prep modules (e.g., SAT, ACT, English proficiency like IELTS/TOEFL), identifying right mentors.
@@ -230,13 +233,18 @@ Rules:
   - `micro_view`: A 2-3 sentence strategic paragraph explaining the execution tasks, coursework, and deliverables (how to choose, how to execute, checklist task targets).
   - `nano_view`: A 2-3 sentence strategic paragraph explaining the mentor guidance focus (personalized matching, expert diagnostics, feedback, cohort check-ins).
 - Distribute the calculated total duration logically across the steps. For example, distribute month ranges like "Months 1-3", "Months 4-6", etc., so they span the entire calculated duration of the pathway.
-- Exactly 3 micro_steps tasks per step.
-- Exactly 3 learning_objectives per step.
-- Exactly 2 macro_free, 2 micro_structured, and 2 nano_expert per step in the marketplace block.
+- Generate a dynamic, appropriate number of micro_steps tasks per step based on the milestone requirements (do not hardcode to exactly 3).
+- Generate a dynamic, appropriate number of learning_objectives per step based on the milestone requirements (do not hardcode to exactly 3).
+- Generate any dynamic number of macro_free, micro_structured, and nano_expert recommendations per step in the marketplace block, tailored dynamically to the requirements of the step rather than a static count.
 - Avoid repeated resource names. Suggest highly specific resources like freeCodeCamp, Coursera, MIT OCW, Khan Academy, specific textbooks.
 - Deeply differentiate based on profile grade, curriculum (CBSE vs. IB vs. University), financial budget, stream, personality type, and location.
 - Each step description MUST be a rich, detailed, multi-sentence paragraph (3-4 sentences). Do NOT provide short, generic, or single-sentence descriptions. Make them highly academic, pedagogical, and context-specific.
 - CRITICAL NAME BAN: NEVER mention the student's personal name (e.g. Sunkara, Chaitanya, Praneeth) or email or personal pronouns in any text fields (titles, descriptions, views, checklist tasks, or objectives). Focus purely on objective, academic instructions.
+- REFINEMENT & VALIDATION RULES:
+  - If a Refinement / Adjustment Request is provided, you MUST first validate it:
+    - Determine if the request is a valid instruction related to adjusting or refining a career/academic pathway (e.g., "change step 3", "make step 4 more specific", "generate 10 steps", "add SAT test prep").
+    - If the request is completely unrelated to the career pathway, contains nonsense, or asks to perform out-of-scope tasks (e.g., "tell me a joke", "what is the weather"), you MUST return a JSON object containing ONLY the key "error" with a polite description explaining why the request is invalid and how the user can ask correctly. Example: {{"error": "I couldn't understand that request. Please provide specific instructions to adjust this pathway, such as 'change step 3' or 'add more milestones'."}}
+    - If the request is valid, perform the refinement. If an Existing Roadmap is provided as context, you MUST preserve all steps that the user did not ask to change. Modify or replace only the specific steps/details requested by the user, while keeping other milestones/steps identical to the existing roadmap.
 """
 
 # ─── AGENT 2: PATH AUDIT AGENT PROMPT ────────────────────────────────────────
@@ -249,7 +257,16 @@ Audited Goals:
 Given this raw blueprint JSON, review and audit:
 1. The overall "path_title" (Is it clear, accurate, and aligned with target goal?)
 2. The overall "path_description" (Is it a professional, highly relevant, multi-sentence strategic summary?)
-3. Estimate a realistic "readiness_score" (0-100) and "readiness_label" (e.g. Early Starter, Advanced, intermediate).
+3. Estimate a realistic "readiness_score" (0-100) and "readiness_label" (e.g. Early Starter, Advanced, Intermediate) based dynamically on the student's profile signals (academic performance, stream, and curriculum) relative to the competitiveness of the Target Career Goal:
+   - For highly competitive targets (e.g., Harvard, Yale, Stanford, MIT, Oxford, IIT, BITS):
+     - If performance is "90% and above", score should be around 30-40 (Early/Intermediate Starter).
+     - If performance is "75%–89%", score should be around 20-30.
+     - If performance is below 75%, score should be around 10-20.
+   - For moderately competitive targets (e.g., Local Universities, State Colleges):
+     - If performance is "90% and above", score should be around 75-85 (Advanced Starter).
+     - If performance is "75%–89%", score should be around 50-60.
+     - If performance is below 75%, score should be around 30-40.
+   - Adjust the score dynamically based on these parameters. Do NOT hardcode it.
 4. Highlight critical "blind_spots" (gaps, potential constraints, or warnings based on their profile).
 5. CRITICAL NAME BAN: Verify that the overall path title and description NEVER mention the student's personal name, email, or personal pronouns. If any names are present, rewrite the text to be completely objective, focusing purely on explaining the main strategic direction of this pathway.
 
@@ -285,6 +302,7 @@ Given this blueprint JSON containing steps and views, review and audit:
 6. The step's "nano_view" (Must be a rich 2-3 sentence paragraph explaining the MENTOR GUIDANCE FOCUS — the diagnostic checks, expert review sessions, and accountability checkpoints that validate readiness to advance).
 7. The step's "micro_steps" checklist tasks (Make sure they are hyper-specific, actionable, and tailored to the student's curriculum/grade).
 8. CRITICAL NAME BAN: Strictly verify that NONE of the step titles, durations, descriptions, learning objectives, views (macro, micro, nano), or micro_steps tasks contain the student's personal name, email, or direct pronouns. Rewrite all fields to be completely objective, professional, and academic, focusing entirely on what the step achieves, how to execute it, and how to complete the step successfully.
+9. CRITICAL STEP PRESERVATION RULE: You MUST audit and return every single milestone/step provided in the blueprint JSON. If the blueprint JSON contains 8 steps, you must output exactly 8 audited steps in your JSON array. If it contains 10 steps, you must output exactly 10 audited steps. Do NOT skip, delete, combine, or truncate the steps under any circumstances.
 
 Output ONLY a valid JSON array of this structure:
 [
@@ -295,16 +313,14 @@ Output ONLY a valid JSON array of this structure:
     "description": "<audited rich detailed multi-sentence description (3-4 sentences)>",
     "learning_objectives": [
       "<audited learning objective 1>",
-      "<audited learning objective 2>",
-      "<audited learning objective 3>"
+      "... for all learning objectives in this step ..."
     ],
     "macro_view": "<audited/refined macro view text>",
     "micro_view": "<audited/refined micro view text>",
     "nano_view": "<audited/refined nano view text>",
     "micro_steps": [
-      {{"task": "<actionable task 1>", "resource": "<real specific resource>"}},
-      {{"task": "<actionable task 2>", "resource": "<real specific resource>"}},
-      {{"task": "<actionable task 3>", "resource": "<real specific resource>"}}
+      {{"task": "<actionable task>", "resource": "<real specific resource>"}},
+      "... for all micro steps in this step ..."
     ]
   }},
   ... for all steps in the blueprint ...
@@ -328,6 +344,7 @@ Ensure resources:
 3. Are highly reputable, real-world educational resources (e.g. Khan Academy, Coursera, MIT OCW, specific standard prep books).
 4. Pricing and next steps are realistic, detailed, and actionable.
 5. CRITICAL NAME BAN: Ensure that no marketplace recommendations, why details, next steps, or outcomes contain the student's personal name, email, or pronouns. Keep all text objective and general.
+6. CRITICAL STEP PRESERVATION RULE: You MUST audit and return the marketplace blocks for every single milestone/step provided in the blueprint JSON. If the blueprint JSON has 8 steps, you must output exactly 8 audited steps in your JSON array. If it has 10 steps, you must output exactly 10 audited steps. Do NOT skip, delete, combine, or truncate steps under any circumstances.
 
 Output ONLY a valid JSON array of this structure:
 [
@@ -341,8 +358,8 @@ Output ONLY a valid JSON array of this structure:
           "why": "<why this fits the macro view>",
           "next_step": "<specific next action>",
           "tags": ["<tag>", "<tag>"]
-        }},
-        ... 2 items ...
+        }}
+        // ... for all free resources in this milestone step ...
       ],
       "micro_structured": [
         {{
@@ -353,8 +370,8 @@ Output ONLY a valid JSON array of this structure:
           "value": "<value proposition for the micro view>",
           "next_step": "<specific enrollment action>",
           "tags": ["<tag>", "<tag>"]
-        }},
-        ... 2 items ...
+        }}
+        // ... for all structured paid resources in this milestone step ...
       ],
       "nano_expert": [
         {{
@@ -364,12 +381,12 @@ Output ONLY a valid JSON array of this structure:
           "session_details": "<session details>",
           "expected_outcomes": "<expected outcomes for the nano view>",
           "tags": ["<tag>", "<tag>"]
-        }},
-        ... 2 items ...
+        }}
+        // ... for all expert mentor services in this milestone step ...
       ]
     }}
   }},
-  ... for all 4 steps ...
+  ... for all steps in the blueprint ...
 ]
 
 Blueprint JSON to Audit:
@@ -434,13 +451,10 @@ def recursive_sanitize(obj, name_tokens: list):
 async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-instant") -> dict:
     models = [
         preferred_model,
-        "llama-3.1-8b-instant",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "openai/gpt-oss-20b",
-        "qwen/qwen3-32b",
         "llama-3.3-70b-versatile",
-        "openai/gpt-oss-120b",
-        "groq/compound"
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it"
     ]
 
 
@@ -767,26 +781,31 @@ def get_fallback_mock_roadmap(current: str, goal: str, profile: dict) -> dict:
     }
 
 # Specialized Audit Tasks
-async def run_agent_1_blueprint(current: str, goal: str, profile: dict) -> dict:
+async def run_agent_1_blueprint(current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> dict:
     prompt = AGENT_1_PROMPT.format(
         current_position=current,
         target_goal=goal,
         profile=json.dumps(profile)
     )
-    print("[Agent 1] Generating initial roadmap blueprint using 8B (with 70B fallback)...")
-    res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
+    if refine_prompt:
+        prompt += f"\n\n==================================================\nCRITICAL USER REQUEST FOR REFINE / ADJUSTMENT:\nThe user has requested the following specific instruction to refine/adjust this pathway. You MUST strictly adhere to and execute this instruction in your output:\n👉 \"{refine_prompt}\"\n==================================================\n"
+        if existing_roadmap:
+            roadmap_to_send = existing_roadmap.get("roadmap_data") or existing_roadmap
+            prompt += f"\nEXISTING ROADMAP (use this as the base reference to modify only what the user requested, leaving other steps unchanged):\n{json.dumps(roadmap_to_send, indent=2)}\n"
+    print("[Agent 1] Generating initial roadmap blueprint using 70B...")
+    res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
     
     # If the daily token limit is exhausted, query_groq_json returns {}
     if not res or "macro_path" not in res:
         print("[Rate Limit Warning] Daily token limit exceeded. Serving board-calibrated fallback roadmap.")
-        # Try the larger model before falling back to the static mock.
-        res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
+        # Try the 8B model before falling back to the static mock.
+        res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
         if not res or "macro_path" not in res:
             # Full lockout: serve high-fidelity static mock custom-built for CBSE/Cambridge
             return get_fallback_mock_roadmap(current, goal, profile)
     return res
 
-async def run_agent_2_path_auditor(blueprint: dict, current: str, goal: str, profile: dict) -> dict:
+async def run_agent_2_path_auditor(blueprint: dict, current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> dict:
     # CONTEXT COMPRESSION: Send only path-level attributes. Save thousands of tokens!
     compressed_blueprint = {
         "path_title": blueprint.get("path_title", ""),
@@ -801,10 +820,15 @@ async def run_agent_2_path_auditor(blueprint: dict, current: str, goal: str, pro
         profile=json.dumps(profile),
         blueprint=json.dumps(compressed_blueprint)
     )
+    if refine_prompt:
+        prompt += f"\n\n==================================================\nCRITICAL USER REQUEST FOR REFINE / ADJUSTMENT:\nThe user has requested the following specific instruction to refine/adjust this pathway. You MUST strictly adhere to and execute this instruction in your output:\n👉 \"{refine_prompt}\"\n==================================================\n"
+        if existing_roadmap:
+            roadmap_to_send = existing_roadmap.get("roadmap_data") or existing_roadmap
+            prompt += f"\nEXISTING ROADMAP:\n{json.dumps(roadmap_to_send, indent=2)}\n"
     print("[Agent 2] Auditing overall path title, description, and readiness using 8B...")
     return await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
 
-async def run_agent_3_steps_auditor(blueprint: dict, current: str, goal: str, profile: dict) -> list:
+async def run_agent_3_steps_auditor(blueprint: dict, current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> list:
     # CONTEXT COMPRESSION: Send step metadata, views, and checklists. Skip marketplace to save tokens!
     compressed_blueprint = [
         {
@@ -826,11 +850,16 @@ async def run_agent_3_steps_auditor(blueprint: dict, current: str, goal: str, pr
         profile=json.dumps(profile),
         blueprint=json.dumps(compressed_blueprint)
     )
+    if refine_prompt:
+        prompt += f"\n\n==================================================\nCRITICAL USER REQUEST FOR REFINE / ADJUSTMENT:\nThe user has requested the following specific instruction to refine/adjust this pathway. You MUST strictly adhere to and execute this instruction in your output:\n👉 \"{refine_prompt}\"\n==================================================\n"
+        if existing_roadmap:
+            roadmap_to_send = existing_roadmap.get("roadmap_data") or existing_roadmap
+            prompt += f"\nEXISTING ROADMAP:\n{json.dumps(roadmap_to_send, indent=2)}\n"
     print("[Agent 3] Auditing steps, learning views, and checklists using 8B...")
     res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
     return res if isinstance(res, list) else []
 
-async def run_agent_4_marketplace_auditor(blueprint: dict, current: str, goal: str, profile: dict) -> list:
+async def run_agent_4_marketplace_auditor(blueprint: dict, current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> list:
     # CONTEXT COMPRESSION: Send only milestone ids and resource structures. Save ~5000 tokens!
     compressed_blueprint = [
         {
@@ -846,6 +875,11 @@ async def run_agent_4_marketplace_auditor(blueprint: dict, current: str, goal: s
         profile=json.dumps(profile),
         blueprint=json.dumps(compressed_blueprint)
     )
+    if refine_prompt:
+        prompt += f"\n\n==================================================\nCRITICAL USER REQUEST FOR REFINE / ADJUSTMENT:\nThe user has requested the following specific instruction to refine/adjust this pathway. You MUST strictly adhere to and execute this instruction in your output:\n👉 \"{refine_prompt}\"\n==================================================\n"
+        if existing_roadmap:
+            roadmap_to_send = existing_roadmap.get("roadmap_data") or existing_roadmap
+            prompt += f"\nEXISTING ROADMAP:\n{json.dumps(roadmap_to_send, indent=2)}\n"
     print("[Agent 4] Auditing resource marketplace selections using 8B...")
     res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
     return res if isinstance(res, list) else []
@@ -980,6 +1014,8 @@ async def generate_path_stream(req: PathGenerationRequest):
     current = req.current_position.strip()
     goal = req.target_goal.strip()
     profile = req.profile or {}
+    refine_prompt = req.refine_prompt.strip() if req.refine_prompt else None
+    existing_roadmap = req.existing_roadmap
 
     if not current or not goal:
         raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
@@ -993,7 +1029,10 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "progress": 20,
                 "message": "Analyzing your profile..."
             })
-            blueprint = await run_agent_1_blueprint(current, goal, profile)
+            blueprint = await run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap)
+            if blueprint and "error" in blueprint:
+                yield sse_payload("error", {"message": blueprint["error"]})
+                return
             completed.append("agent1")
             yield sse_payload("status", {
                 "statuses": build_agent_statuses(None, completed),
@@ -1007,7 +1046,7 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "message": "Building your roadmap..."
             })
             try:
-                path_audit = await run_agent_2_path_auditor(blueprint, current, goal, profile)
+                path_audit = await run_agent_2_path_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
             except Exception as e:
                 print(f"Agent 2 Error: {e}")
                 path_audit = {}
@@ -1024,7 +1063,7 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "message": "Refining milestones and checklists..."
             })
             try:
-                steps_audit = await run_agent_3_steps_auditor(blueprint, current, goal, profile)
+                steps_audit = await run_agent_3_steps_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
             except Exception as e:
                 print(f"Agent 3 Error: {e}")
                 steps_audit = []
@@ -1041,7 +1080,7 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "message": "Finding learning resources..."
             })
             try:
-                market_audit = await run_agent_4_marketplace_auditor(blueprint, current, goal, profile)
+                market_audit = await run_agent_4_marketplace_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
             except Exception as e:
                 print(f"Agent 4 Error: {e}")
                 market_audit = []
@@ -1082,18 +1121,22 @@ async def generate_path(req: PathGenerationRequest):
     current = req.current_position.strip()
     goal = req.target_goal.strip()
     profile = req.profile or {}
+    refine_prompt = req.refine_prompt.strip() if req.refine_prompt else None
+    existing_roadmap = req.existing_roadmap
     
     if not current or not goal:
         raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
     
     try:
         # Step 1: Run Agent 1 (Blueprint Generator)
-        blueprint = await run_agent_1_blueprint(current, goal, profile)
+        blueprint = await run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap)
+        if blueprint and "error" in blueprint:
+            raise HTTPException(status_code=400, detail=blueprint["error"])
         
         # Step 2: Trigger Agents 2, 3, and 4 in parallel using asyncio.gather
-        agent2_task = run_agent_2_path_auditor(blueprint, current, goal, profile)
-        agent3_task = run_agent_3_steps_auditor(blueprint, current, goal, profile)
-        agent4_task = run_agent_4_marketplace_auditor(blueprint, current, goal, profile)
+        agent2_task = run_agent_2_path_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
+        agent3_task = run_agent_3_steps_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
+        agent4_task = run_agent_4_marketplace_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
         
         path_audit, steps_audit, market_audit = await asyncio.gather(
             agent2_task, agent3_task, agent4_task,
@@ -1376,25 +1419,67 @@ async def generate_path_legacy(req: GoalRequest):
 @app.get("/api/admin/paths")
 async def get_admin_paths(status: Optional[str] = "under_admin_review"):
     paths = []
+    projection = {"roadmap_data.macro_path": 0}
     
-    # If status is "under_admin_review" or "all":
+    # 1. Fetch raw documents from DB with projection
+    raw_docs = []
     if status == "under_admin_review" or status == "all":
-        cursor = pending_paths_collection.find({}).sort("created_at", -1)
+        cursor = pending_paths_collection.find({}, projection).sort("created_at", -1)
         async for doc in cursor:
             doc["status"] = "under_admin_review"
-            serialized = serialize_mongo_doc(doc)
-            enriched = await enrich_path_profile(serialized)
-            paths.append(enriched)
+            raw_docs.append(doc)
             
-    # If status is "published" or "all":
     if status == "published" or status == "all":
-        cursor = published_paths_collection.find({}).sort("created_at", -1)
+        cursor = published_paths_collection.find({}, projection).sort("created_at", -1)
         async for doc in cursor:
             doc["status"] = "published"
-            serialized = serialize_mongo_doc(doc)
-            enriched = await enrich_path_profile(serialized)
-            paths.append(enriched)
+            raw_docs.append(doc)
             
+    if not raw_docs:
+        return []
+
+    # 2. Extract unique emails for bulk profile fetch
+    emails = set()
+    for doc in raw_docs:
+        email = None
+        if "profile" in doc and doc["profile"] and "email" in doc["profile"]:
+            email = doc["profile"]["email"]
+        if not email and "created_by" in doc and doc["created_by"]:
+            email = doc["created_by"]
+        if not email and "createdBy" in doc and doc["createdBy"]:
+            email = doc["createdBy"]
+        if email:
+            emails.add(email.lower())
+            
+    # 3. Bulk fetch profiles from DB in one roundtrip
+    profile_map = {}
+    if emails:
+        profiles_cursor = profiles_collection.find({"email": {"$in": list(emails)}})
+        async for p in profiles_cursor:
+            profile_map[p["email"].lower()] = serialize_mongo_doc(p)
+
+    # 4. Serialize and enrich in-memory (0 database calls per path)
+    for doc in raw_docs:
+        serialized = serialize_mongo_doc(doc)
+        
+        email = None
+        if "profile" in serialized and serialized["profile"] and "email" in serialized["profile"]:
+            email = serialized["profile"]["email"]
+        if not email and "created_by" in serialized and serialized["created_by"]:
+            email = serialized["created_by"]
+        if not email and "createdBy" in serialized and serialized["createdBy"]:
+            email = serialized["createdBy"]
+            
+        if email and email.lower() in profile_map:
+            serialized["profile"] = profile_map[email.lower()]
+            serialized["created_by"] = email.lower()
+            serialized["createdBy"] = email.lower()
+        else:
+            if "profile" not in serialized or not serialized["profile"]:
+                serialized["profile"] = {"email": email or "", "name": "Anonymous Student"}
+                
+        paths.append(serialized)
+        
     # Sort them combined by created_at desc if status was "all"
     if status == "all":
         paths.sort(key=lambda x: x.get("created_at") or "", reverse=True)

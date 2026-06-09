@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import StepDetail from "./pages/StepDetail";
 import Marketplace from "./pages/Marketplace";
 import AdminReview from "./pages/Adminreview";
+import ProfileDetails from "./pages/ProfileDetails";
 import {
   IconArrowLeft,
   IconBuilding,
@@ -16,6 +17,7 @@ import {
   IconShoppingCart,
   IconTarget,
   IconCheck,
+  IconUser,
 } from "./pages/Icons";
 import "./App.css";
 
@@ -61,6 +63,7 @@ export default function App() {
   const goTo = (p) => {
     const routeMap = {
       dashboard: "/dashboard",
+      profile: "/profile",
       stepdetail: "/step-detail",
       marketplace: "/marketplace",
       adminreview: "/admin-review",
@@ -107,6 +110,7 @@ export default function App() {
     { key: "stepdetail",  label: "Step Details",  Icon: IconMap,         enabled: !!activeStep },
     { key: "marketplace", label: "Marketplace",   Icon: IconShoppingCart,enabled: !!activeStep },
     { key: "adminreview", label: "Admin Review",  Icon: IconCheck,       enabled: true },
+    { key: "profile",     label: "Profile Details", Icon: IconUser,        enabled: true },
   ];
 
   const currentPath = location.pathname;
@@ -136,6 +140,7 @@ export default function App() {
         <nav className="sidebar-nav">
           {navItems.map(item => {
             const isActive = (item.key === "dashboard" && isDashboard) ||
+                             (item.key === "profile" && currentPath === "/profile") ||
                              (item.key === "stepdetail" && currentPath === "/step-detail") ||
                              (item.key === "marketplace" && currentPath === "/marketplace") ||
                              (item.key === "adminreview" && currentPath === "/admin-review");
@@ -227,6 +232,14 @@ export default function App() {
                 onPathGenerated={handlePathGenerated}
                 onStepClick={handleStepClick}
                 onGenerationStart={handleGenerationStart}
+                onProfileUpdated={setProfile}
+              />
+            } />
+            <Route path="/profile" element={
+              <ProfileDetails
+                profile={profile}
+                onProfileUpdated={setProfile}
+                onBack={() => navigate("/dashboard")}
               />
             } />
             <Route path="/step-detail" element={
