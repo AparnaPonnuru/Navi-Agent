@@ -60,6 +60,8 @@ function ExportIcon({ size = 13 }) {
   );
 }
 
+
+
 // ── Empty templates ────────────────────────────────────────────────────────
 function emptyMilestone(id) {
   return {
@@ -122,18 +124,28 @@ export default function AdminReview() {
   // Confirm delete modal
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm }
 
+  // Alternatives index state
+  const [activeAltIdx, setActiveAltIdx] = useState(0);
+  const activeRoadmap = editedRoadmap?.alternatives ? editedRoadmap.alternatives[activeAltIdx] : editedRoadmap;
+
   // ── PDF Export ────────────────────────────────────────────────────────
   const handleExportPdf = async (pathParam) => {
     const isEvent = pathParam && (pathParam.nativeEvent || pathParam.preventDefault || typeof pathParam.stopPropagation === 'function');
     const pathToExport = (pathParam && !isEvent) ? pathParam : selectedPath;
-    if (!pathToExport) { alert('Select a path to generate report'); return; }
+    if (!pathToExport) {
+      console.warn("[Naavi AdminReview] Export PDF called but no pathway is selected or passed.");
+      alert('Select a path to generate report');
+      return;
+    }
+    console.log("[Naavi AdminReview] Starting PDF report export for path:", pathToExport);
     setPdfLoading(true);
     try {
       const doc    = new jsPDF();
       const now    = new Date();
       const dateStr = now.toLocaleDateString();
-      const roadmap = (selectedPath && pathToExport.id === selectedPath.id && editedRoadmap)
+      const roadmapRaw = (selectedPath && pathToExport.id === selectedPath.id && editedRoadmap)
         ? editedRoadmap : pathToExport.roadmap_data;
+      const roadmap = roadmapRaw?.alternatives ? roadmapRaw.alternatives[activeAltIdx] : roadmapRaw;
 
       const printSection = (docInstance, title, content, x, y, width) => {
         let cy = y;
@@ -202,35 +214,48 @@ export default function AdminReview() {
       });
 
       doc.save(`naavi-admin-report-${now.toISOString().split('T')[0]}.pdf`);
-    } catch (e) { console.error(e); alert('Failed to generate PDF'); }
+      console.log("[Naavi AdminReview] PDF report generated and saved successfully.");
+    } catch (e) {
+      console.error("[Naavi AdminReview] Failed to generate report PDF:", e);
+      alert('Failed to generate PDF');
+    }
     setPdfLoading(false);
   };
 
   // ── Queue load ────────────────────────────────────────────────────────
   async function loadQueue() {
+    console.log("[Naavi AdminReview] Fetching admin review queue from backend...");
     setLoadingQueue(true); setError("");
     try {
       const res = await fetch(`${API}/api/admin/paths?status=all`);
       if (!res.ok) throw new Error("Failed to fetch paths");
-      setPathsQueue(await res.json());
-    } catch (e) { setError("Cannot load admin review queue. Verify the backend is running."); }
-    finally { setLoadingQueue(false); }
+      const data = await res.json();
+      console.log(`[Naavi AdminReview] Review queue loaded. Received ${data.length} paths.`);
+      setPathsQueue(data);
+    } catch (e) {
+      console.error("[Naavi AdminReview] Failed to load review queue:", e);
+      setError("Cannot load admin review queue. Verify the backend is running.");
+    } finally {
+      setLoadingQueue(false);
+    }
   }
 
   useEffect(() => { loadQueue(); }, []);
 
   async function selectPathForReview(pathDoc) {
+    console.log("[Naavi AdminReview] Path selected for review. Path ID:", pathDoc.id, "Target goal:", pathDoc.target_goal);
     setLoadingQueue(true);
     setError("");
     try {
       const res = await fetch(`${API}/api/paths/${pathDoc.id}`);
       if (!res.ok) throw new Error("Failed to fetch path details");
       const fullPath = await res.json();
+      console.log("[Naavi AdminReview] Successfully fetched full path details:", fullPath);
       setSelectedPath(fullPath);
       setEditedRoadmap(JSON.parse(JSON.stringify(fullPath.roadmap_data)));
       setSuccessMsg(""); setEditingDetails(false); setEditingMilestoneIdx(null); setExpandedMarkets({});
     } catch (e) {
-      console.error(e);
+      console.error("[Naavi AdminReview] Error fetching path details:", e);
       setError("Failed to load pathway details. Verify the backend is running.");
     } finally {
       setLoadingQueue(false);
@@ -239,44 +264,90 @@ export default function AdminReview() {
 
   // ── Save to DB ────────────────────────────────────────────────────────
   async function saveRoadmapUpdate(updatedRoadmap, statusOverride) {
-    if (!selectedPath) return false;
+    if (!selectedPath) {
+      console.warn("[Naavi AdminReview] saveRoadmapUpdate called but no selected path exists.");
+      return false;
+    }
+    const targetStatus = statusOverride || selectedPath.status;
+    console.log("[Naavi AdminReview] Saving updated roadmap in DB. Path ID:", selectedPath.id, "Target status:", targetStatus, "Roadmap details:", updatedRoadmap);
     setLoadingSubmit(true); setError("");
     try {
       const res = await fetch(`${API}/api/paths/${selectedPath.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roadmap_data: updatedRoadmap, status: statusOverride || selectedPath.status })
+        body: JSON.stringify({ roadmap_data: updatedRoadmap, status: targetStatus })
       });
       if (!res.ok) throw new Error("Failed to update career path");
+      console.log("[Naavi AdminReview] Save update response success.");
       setPathsQueue(prev => prev.map(p => p.id === selectedPath.id ? { ...p, roadmap_data: updatedRoadmap } : p));
       flash("Changes saved successfully!");
       return true;
-    } catch (e) { setError(e.message); return false; }
-    finally { setLoadingSubmit(false); }
+    } catch (e) {
+      console.error("[Naavi AdminReview] Save roadmap update error:", e);
+      setError(e.message);
+      return false;
+    } finally {
+      setLoadingSubmit(false);
+    }
   }
 
   function flash(msg) { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(""), 3000); }
 
   // ── Details edit ──────────────────────────────────────────────────────
   function startEditDetails() {
-    setTempDetails({ path_title: editedRoadmap.path_title || "", path_description: editedRoadmap.path_description || "", readiness_score: editedRoadmap.readiness_score || 0, readiness_label: editedRoadmap.readiness_label || "", total_duration: editedRoadmap.total_duration || "" });
+    setTempDetails({
+      path_title: activeRoadmap.path_title || "",
+      path_description: activeRoadmap.path_description || "",
+      readiness_score: activeRoadmap.readiness_score || 0,
+      readiness_label: activeRoadmap.readiness_label || "",
+      total_duration: activeRoadmap.total_duration || ""
+    });
     setEditingDetails(true);
   }
   async function saveDetails() {
-    const updated = { ...editedRoadmap, ...tempDetails };
-    if (await saveRoadmapUpdate(updated)) { setEditedRoadmap(updated); setEditingDetails(false); }
+    let updated;
+    if (editedRoadmap?.alternatives) {
+      const updatedAlternatives = [...editedRoadmap.alternatives];
+      updatedAlternatives[activeAltIdx] = {
+        ...updatedAlternatives[activeAltIdx],
+        ...tempDetails
+      };
+      updated = { ...editedRoadmap, alternatives: updatedAlternatives };
+    } else {
+      updated = { ...editedRoadmap, ...tempDetails };
+    }
+    if (await saveRoadmapUpdate(updated)) {
+      setEditedRoadmap(updated);
+      setEditingDetails(false);
+    }
   }
 
   // ── Milestone edit ────────────────────────────────────────────────────
   function startEditMilestone(idx) {
     setEditingMilestoneIdx(idx);
-    setTempMilestone(JSON.parse(JSON.stringify(editedRoadmap.macro_path[idx])));
+    setTempMilestone(JSON.parse(JSON.stringify(activeRoadmap.macro_path[idx])));
   }
   async function saveMilestone(idx) {
-    const updatedPath = [...editedRoadmap.macro_path];
-    updatedPath[idx] = tempMilestone;
-    const updated = { ...editedRoadmap, macro_path: updatedPath };
-    if (await saveRoadmapUpdate(updated)) { setEditedRoadmap(updated); setEditingMilestoneIdx(null); setTempMilestone(null); }
+    let updated;
+    if (editedRoadmap?.alternatives) {
+      const updatedAlternatives = [...editedRoadmap.alternatives];
+      const updatedPath = [...updatedAlternatives[activeAltIdx].macro_path];
+      updatedPath[idx] = tempMilestone;
+      updatedAlternatives[activeAltIdx] = {
+        ...updatedAlternatives[activeAltIdx],
+        macro_path: updatedPath
+      };
+      updated = { ...editedRoadmap, alternatives: updatedAlternatives };
+    } else {
+      const updatedPath = [...editedRoadmap.macro_path];
+      updatedPath[idx] = tempMilestone;
+      updated = { ...editedRoadmap, macro_path: updatedPath };
+    }
+    if (await saveRoadmapUpdate(updated)) {
+      setEditedRoadmap(updated);
+      setEditingMilestoneIdx(null);
+      setTempMilestone(null);
+    }
   }
   function cancelEditMilestone() { setEditingMilestoneIdx(null); setTempMilestone(null); }
 
@@ -287,24 +358,57 @@ export default function AdminReview() {
   // ── Delete milestone ──────────────────────────────────────────────────
   function confirmDeleteMilestone(idx) {
     setConfirmModal({
-      message: `Delete Step ${editedRoadmap.macro_path[idx].id}: "${editedRoadmap.macro_path[idx].title}"? This cannot be undone.`,
+      message: `Delete Step ${activeRoadmap.macro_path[idx].id}: "${activeRoadmap.macro_path[idx].title}"? This cannot be undone.`,
       onConfirm: async () => {
         setConfirmModal(null);
-        const updatedPath = editedRoadmap.macro_path.filter((_, i) => i !== idx).map((m, i) => ({ ...m, id: i + 1 }));
-        const updated = { ...editedRoadmap, macro_path: updatedPath };
-        if (await saveRoadmapUpdate(updated)) { setEditedRoadmap(updated); if (editingMilestoneIdx === idx) { setEditingMilestoneIdx(null); setTempMilestone(null); } }
+        let updated;
+        if (editedRoadmap?.alternatives) {
+          const updatedAlternatives = [...editedRoadmap.alternatives];
+          const updatedPath = updatedAlternatives[activeAltIdx].macro_path
+            .filter((_, i) => i !== idx)
+            .map((m, i) => ({ ...m, id: i + 1 }));
+          updatedAlternatives[activeAltIdx] = {
+            ...updatedAlternatives[activeAltIdx],
+            macro_path: updatedPath
+          };
+          updated = { ...editedRoadmap, alternatives: updatedAlternatives };
+        } else {
+          const updatedPath = editedRoadmap.macro_path
+            .filter((_, i) => i !== idx)
+            .map((m, i) => ({ ...m, id: i + 1 }));
+          updated = { ...editedRoadmap, macro_path: updatedPath };
+        }
+        if (await saveRoadmapUpdate(updated)) {
+          setEditedRoadmap(updated);
+          if (editingMilestoneIdx === idx) {
+            setEditingMilestoneIdx(null);
+            setTempMilestone(null);
+          }
+        }
       }
     });
   }
 
   // ── Add milestone ─────────────────────────────────────────────────────
   async function addMilestone() {
-    const newId = (editedRoadmap.macro_path?.length || 0) + 1;
+    const newId = (activeRoadmap.macro_path?.length || 0) + 1;
     const newMilestone = emptyMilestone(newId);
-    const updated = { ...editedRoadmap, macro_path: [...(editedRoadmap.macro_path || []), newMilestone] };
+    let updated;
+    if (editedRoadmap?.alternatives) {
+      const updatedAlternatives = [...editedRoadmap.alternatives];
+      const updatedPath = [...(updatedAlternatives[activeAltIdx].macro_path || []), newMilestone];
+      updatedAlternatives[activeAltIdx] = {
+        ...updatedAlternatives[activeAltIdx],
+        macro_path: updatedPath
+      };
+      updated = { ...editedRoadmap, alternatives: updatedAlternatives };
+    } else {
+      updated = { ...editedRoadmap, macro_path: [...(editedRoadmap.macro_path || []), newMilestone] };
+    }
     if (await saveRoadmapUpdate(updated)) {
       setEditedRoadmap(updated);
-      setEditingMilestoneIdx(updated.macro_path.length - 1);
+      const newIdx = (activeRoadmap.macro_path?.length || 0);
+      setEditingMilestoneIdx(newIdx);
       setTempMilestone(JSON.parse(JSON.stringify(newMilestone)));
     }
   }
@@ -331,7 +435,11 @@ export default function AdminReview() {
     } else {
       // Direct edit mode for marketplace even when step is not in edit mode
       const updated = JSON.parse(JSON.stringify(editedRoadmap));
-      updated.macro_path[mIdx].marketplace[marketKey][rIdx][field] = value;
+      if (updated.alternatives) {
+        updated.alternatives[activeAltIdx].macro_path[mIdx].marketplace[marketKey][rIdx][field] = value;
+      } else {
+        updated.macro_path[mIdx].marketplace[marketKey][rIdx][field] = value;
+      }
       setEditedRoadmap(updated);
     }
   }
@@ -340,9 +448,20 @@ export default function AdminReview() {
     // If the step is currently in edit mode, we need to merge tempMilestone first
     let roadmapToSave = editedRoadmap;
     if (editingMilestoneIdx === mIdx && tempMilestone) {
-      const updatedPath = [...editedRoadmap.macro_path];
-      updatedPath[mIdx] = tempMilestone;
-      roadmapToSave = { ...editedRoadmap, macro_path: updatedPath };
+      if (editedRoadmap?.alternatives) {
+        const updatedAlternatives = [...editedRoadmap.alternatives];
+        const updatedPath = [...updatedAlternatives[activeAltIdx].macro_path];
+        updatedPath[mIdx] = tempMilestone;
+        updatedAlternatives[activeAltIdx] = {
+          ...updatedAlternatives[activeAltIdx],
+          macro_path: updatedPath
+        };
+        roadmapToSave = { ...editedRoadmap, alternatives: updatedAlternatives };
+      } else {
+        const updatedPath = [...editedRoadmap.macro_path];
+        updatedPath[mIdx] = tempMilestone;
+        roadmapToSave = { ...editedRoadmap, macro_path: updatedPath };
+      }
       setEditedRoadmap(roadmapToSave);
     }
     await saveRoadmapUpdate(roadmapToSave);
@@ -358,7 +477,11 @@ export default function AdminReview() {
       });
     } else {
       const updated = JSON.parse(JSON.stringify(editedRoadmap));
-      updated.macro_path[mIdx].marketplace[marketKey].push(emptyFns[marketKey]());
+      if (updated.alternatives) {
+        updated.alternatives[activeAltIdx].macro_path[mIdx].marketplace[marketKey].push(emptyFns[marketKey]());
+      } else {
+        updated.macro_path[mIdx].marketplace[marketKey].push(emptyFns[marketKey]());
+      }
       setEditedRoadmap(updated);
     }
   }
@@ -376,7 +499,11 @@ export default function AdminReview() {
           });
         } else {
           const updated = JSON.parse(JSON.stringify(editedRoadmap));
-          updated.macro_path[mIdx].marketplace[marketKey].splice(rIdx, 1);
+          if (updated.alternatives) {
+            updated.alternatives[activeAltIdx].macro_path[mIdx].marketplace[marketKey].splice(rIdx, 1);
+          } else {
+            updated.macro_path[mIdx].marketplace[marketKey].splice(rIdx, 1);
+          }
           if (await saveRoadmapUpdate(updated)) setEditedRoadmap(updated);
         }
       }
@@ -388,9 +515,15 @@ export default function AdminReview() {
     if (!selectedPath || !editedRoadmap) return;
     setLoadingSubmit(true); setError("");
     try {
+      let roadmapDataToSubmit = editedRoadmap;
+      if (statusToSet === STATUS.published) {
+        roadmapDataToSubmit = editedRoadmap.alternatives
+          ? editedRoadmap.alternatives[activeAltIdx]
+          : editedRoadmap;
+      }
       const res = await fetch(`${API}/api/paths/${selectedPath.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roadmap_data: editedRoadmap, status: statusToSet })
+        body: JSON.stringify({ roadmap_data: roadmapDataToSubmit, status: statusToSet })
       });
       if (!res.ok) throw new Error("Failed to update");
       flash(`Roadmap marked as ${statusToSet.toUpperCase()}!`);
@@ -398,6 +531,8 @@ export default function AdminReview() {
     } catch (e) { setError(e.message); }
     finally { setLoadingSubmit(false); }
   }
+
+
 
   // ── Filtered queue ────────────────────────────────────────────────────
   const displayedPaths = pathsQueue.filter(p => p.status === filterStatus);
@@ -556,9 +691,9 @@ export default function AdminReview() {
                   <div key={path.id} className={`ar-queue-card card status-${path.status}`}>
                     <div className="ar-q-top">
                       <div className="ar-q-student">
-                        <IconUser size={14} />
+                        <IconNavigation size={14} style={{ color: "var(--accent)" }} />
                         <div className="ar-q-student-info">
-                          <strong>{path.profile?.name || path.profile?.email || "Anonymous Student"}</strong>
+                          <strong>{path.status === "published" ? "Published Pathway" : "Pathway Curation"}</strong>
                           <span className="ar-q-date">{dateStr}</span>
                         </div>
                       </div>
@@ -574,8 +709,22 @@ export default function AdminReview() {
                     <div className="ar-q-meta">
                       <div className="meta-item"><span>Grade</span><span>{path.profile?.grade || "N/A"}</span></div>
                       <div className="meta-item"><span>Board</span><span>{path.profile?.curriculum || "N/A"}</span></div>
-                      <div className="meta-item"><span>Readiness</span><strong className="green-text">{path.roadmap_data?.readiness_score}%</strong></div>
-                      <div className="meta-item"><span>Duration</span><span>{path.roadmap_data?.total_duration}</span></div>
+                      <div className="meta-item">
+                        <span>Readiness</span>
+                        <strong className="green-text">
+                          {path.roadmap_data?.alternatives
+                            ? `${path.roadmap_data.alternatives[0]?.readiness_score || 0}%`
+                            : `${path.roadmap_data?.readiness_score || 0}%`}
+                        </strong>
+                      </div>
+                      <div className="meta-item">
+                        <span>Duration</span>
+                        <span>
+                          {path.roadmap_data?.alternatives
+                            ? path.roadmap_data.alternatives[0]?.total_duration
+                            : path.roadmap_data?.total_duration}
+                        </span>
+                      </div>
                     </div>
                     <button className="ar-q-btn" onClick={() => selectPathForReview(path)}>
                       {path.status === "published" ? "View Published →" : "Audit & Curate →"}
@@ -598,12 +747,15 @@ export default function AdminReview() {
             </button>
             <div className="editor-title-row">
               <div>
-                <h1>{isReadOnly ? "Viewing:" : "Curating:"} {selectedPath.profile?.name || "Student"}</h1>
+                <h1>{isReadOnly ? "Viewing Pathway" : "Curating Pathway"}</h1>
                 <p>{isReadOnly ? "Published & locked — read-only view." : "Edit milestones, views, and marketplace resources. All changes auto-save to database."}</p>
               </div>
-              <button className="btn-pdf" onClick={() => handleExportPdf()} disabled={pdfLoading}>
-                {pdfLoading ? "Generating..." : <><ExportIcon size={14} /><span>Export PDF</span></>}
-              </button>
+              <div className="editor-title-actions">
+
+                <button className="btn-pdf" onClick={() => handleExportPdf()} disabled={pdfLoading}>
+                  {pdfLoading ? "Generating..." : <><ExportIcon size={14} /><span>Export PDF</span></>}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -612,6 +764,31 @@ export default function AdminReview() {
           )}
           {error && (
             <div className="ar-error-inline"><IconAlert size={14} />{error}</div>
+          )}
+
+          {/* Alternatives selector tabs for Admin Review */}
+          {editedRoadmap.alternatives && (
+            <div className="ar-alt-tabs-container">
+              <span className="ar-alt-tabs-label">Strategic Pathway Options</span>
+              <div className="ar-alt-tabs">
+                {editedRoadmap.alternatives.map((alt, idx) => (
+                  <button
+                    key={idx}
+                    className={`ar-alt-tab-btn ${activeAltIdx === idx ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveAltIdx(idx);
+                      // Clear editing state when switching tabs
+                      setEditingDetails(false);
+                      setEditingMilestoneIdx(null);
+                      setTempMilestone(null);
+                    }}
+                  >
+                    <span className="tab-dot" />
+                    {alt.option_name || `Option ${idx + 1}`}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* ── Global Metrics ─────────────────────────────────────── */}
@@ -627,23 +804,23 @@ export default function AdminReview() {
               <div className="stats-read-grid">
                 <div className="stat-read-item span-2">
                   <span>Pathway Title</span>
-                  <strong>{editedRoadmap.path_title || `Pathway to ${selectedPath.target_goal}`}</strong>
+                  <strong>{activeRoadmap.path_title || `Pathway to ${selectedPath.target_goal}`}</strong>
                 </div>
                 <div className="stat-read-item span-2">
                   <span>Description</span>
-                  <p className="stat-desc">{editedRoadmap.path_description || "No description."}</p>
+                  <p className="stat-desc">{activeRoadmap.path_description || "No description."}</p>
                 </div>
                 <div className="stat-read-item">
                   <span>Readiness Score</span>
-                  <strong className="green-text">{editedRoadmap.readiness_score}%</strong>
+                  <strong className="green-text">{activeRoadmap.readiness_score}%</strong>
                 </div>
                 <div className="stat-read-item">
                   <span>Readiness Label</span>
-                  <span>{editedRoadmap.readiness_label}</span>
+                  <span>{activeRoadmap.readiness_label}</span>
                 </div>
                 <div className="stat-read-item">
                   <span>Total Duration</span>
-                  <span>{editedRoadmap.total_duration}</span>
+                  <span>{activeRoadmap.total_duration}</span>
                 </div>
               </div>
             ) : (
@@ -693,7 +870,7 @@ export default function AdminReview() {
               )}
             </div>
 
-            {editedRoadmap.macro_path?.map((milestone, mIdx) => {
+            {activeRoadmap.macro_path?.map((milestone, mIdx) => {
               const isEditing    = editingMilestoneIdx === mIdx;
               const activeMilestone = isEditing ? tempMilestone : milestone;
 
@@ -809,7 +986,7 @@ export default function AdminReview() {
             })}
 
             {/* Empty state for milestones */}
-            {(!editedRoadmap.macro_path || editedRoadmap.macro_path.length === 0) && (
+            {(!activeRoadmap.macro_path || activeRoadmap.macro_path.length === 0) && (
               <div className="ar-empty-state card" style={{ padding: 32 }}>
                 <p style={{ color: "var(--text3)" }}>No milestones yet. Click "Add New Step" to create the first one.</p>
               </div>

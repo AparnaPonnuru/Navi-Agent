@@ -57,6 +57,7 @@ class PathGenerationRequest(BaseModel):
     profile: Optional[dict] = None
     refine_prompt: Optional[str] = None
     existing_roadmap: Optional[dict] = None
+    focus: Optional[str] = None
 
 class PathAuditRequest(BaseModel):
     blueprint: dict
@@ -71,6 +72,16 @@ class GoalRequest(BaseModel):
 class UpdatePathRequest(BaseModel):
     roadmap_data: dict
     status: str = "published"
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class SavePathRequest(BaseModel):
+    current_position: str
+    target_goal: str
+    profile: Optional[dict] = None
+    roadmap_data: dict
 
 def serialize_mongo_doc(doc):
     if not doc:
@@ -129,8 +140,8 @@ Your task is to draft the initial raw career roadmap based on:
 Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
 
 {{
-  "path_title": "Academic Pathway from {current_position} to {target_goal}",
-  "path_description": "A comprehensive pedagogical pathway designed to take a student from {current_position} to a target career or academic destination of {target_goal}.",
+  "path_title": "{focus_title_prefix} Pathway from {current_position} to {target_goal}",
+  "path_description": "A comprehensive pedagogical pathway designed to take a student from {current_position} to a target career or academic destination of {target_goal} focusing on {focus_area}.",
   "readiness_score": 15,
   "readiness_label": "High School Starter",
   "total_duration": "<calculated total duration, e.g. '36 months' or '24 months' or '12 months'>",
@@ -240,10 +251,14 @@ Rules:
 - Deeply differentiate based on profile grade, curriculum (CBSE vs. IB vs. University), financial budget, stream, personality type, and location.
 - Each step description MUST be a rich, detailed, multi-sentence paragraph (3-4 sentences). Do NOT provide short, generic, or single-sentence descriptions. Make them highly academic, pedagogical, and context-specific.
 - CRITICAL NAME BAN: NEVER mention the student's personal name (e.g. Sunkara, Chaitanya, Praneeth) or email or personal pronouns in any text fields (titles, descriptions, views, checklist tasks, or objectives). Focus purely on objective, academic instructions.
-- REFINEMENT & VALIDATION RULES:
-  - If a Refinement / Adjustment Request is provided, you MUST first validate it:
-    - Determine if the request is a valid instruction related to adjusting or refining a career/academic pathway (e.g., "change step 3", "make step 4 more specific", "generate 10 steps", "add SAT test prep").
-    - If the request is completely unrelated to the career pathway, contains nonsense, or asks to perform out-of-scope tasks (e.g., "tell me a joke", "what is the weather"), you MUST return a JSON object containing ONLY the key "error" with a polite description explaining why the request is invalid and how the user can ask correctly. Example: {{"error": "I couldn't understand that request. Please provide specific instructions to adjust this pathway, such as 'change step 3' or 'add more milestones'."}}
+- REFINEMENT, KEYWORD UNDERSTANDING & VALIDATION RULES:
+  - If a Refinement / Adjustment Request is provided:
+    - You MUST understand the keywords and intent behind it:
+      - E.g., if it says "change step X description", you MUST locate the step with id X and rewrite its "description" text exactly as requested (or make it more detailed/aligned with their feedback).
+      - E.g., if it says "add more steps" or "add X steps", you MUST increase the number of milestones in the "macro_path" and insert relevant steps with correct IDs.
+      - E.g., if it says "add correct marketplace" or "change marketplace", you MUST adjust the "marketplace" objects inside the relevant steps.
+      - E.g., if it says "give more accurate" or "add SAT prep", you MUST modify descriptions, objectives, and checklists to include those academic resources.
+    - If the request is completely unrelated to the career pathway, contains nonsense, or asks to perform out-of-scope tasks (e.g., "tell me a joke", "tell me a story", "what is the weather"), you MUST return a JSON object containing ONLY the key "error" with a polite description explaining why the request is invalid and how the user can ask correctly. Example: {{"error": "This request is irrelevant to career pathway refinement. Please provide specific instructions to adjust this pathway, such as 'change step 1 description' or 'add more milestones'."}}
     - If the request is valid, perform the refinement. If an Existing Roadmap is provided as context, you MUST preserve all steps that the user did not ask to change. Modify or replace only the specific steps/details requested by the user, while keeping other milestones/steps identical to the existing roadmap.
 """
 
@@ -339,8 +354,8 @@ Audited Goals:
 
 Given this blueprint JSON, review the "marketplace" block for each step.
 Ensure resources:
-1. Match the budget limits (Limited budget => free/low cost, comfortable => high quality bootcamps/mentors).
-2. Match learning/personality traits (Introvert => self-paced, Extrovert => hackathons/cooperative).
+1. Match the budget limits (Lower percentages like 0-25% or 25-50% => free/low cost resources, higher percentages => high quality bootcamps/paid courses/premium mentoring).
+2. Match personality traits (RIASEC codes: Realistic => practical/hands-on tasks, Investigative => research/data/logic, Artistic => design/creative writing, Social => teaching/helping/cooperative, Enterprising => startup/business/leadership, Conventional => structured/admin/analytical tracking).
 3. Are highly reputable, real-world educational resources (e.g. Khan Academy, Coursera, MIT OCW, specific standard prep books).
 4. Pricing and next steps are realistic, detailed, and actionable.
 5. CRITICAL NAME BAN: Ensure that no marketplace recommendations, why details, next steps, or outcomes contain the student's personal name, email, or pronouns. Keep all text objective and general.
@@ -451,10 +466,10 @@ def recursive_sanitize(obj, name_tokens: list):
 async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-instant") -> dict:
     models = [
         preferred_model,
-        "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768",
-        "gemma2-9b-it"
+        "llama-3.3-70b-versatile",
+        "qwen/qwen3-32b",
+        "openai/gpt-oss-20b"
     ]
 
 
@@ -470,11 +485,13 @@ async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-inst
     last_err = None
     for m in unique_models:
         try:
-            # Increase max_tokens significantly — richer prompts need more output tokens
+            estimated_input_tokens = int(len(prompt) / 3.2)
             if "70b" in m or "120b" in m or "32b" in m or "17b" in m:
-                max_tok = 8000
+                max_tok = 4096
             else:
-                max_tok = 4000
+                max_tok = max(1000, 5800 - estimated_input_tokens)
+                if max_tok > 2500:
+                    max_tok = 2500
 
             response = await async_client.chat.completions.create(
                 model=m,
@@ -532,8 +549,163 @@ async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-inst
     return {}
 
 
+def split_duration(duration_str: str, num_parts: int, index: int) -> str:
+    # Match ranges like "Months 1-4" or "Months 13-16" or "1-4"
+    match = re.search(r'(\d+)\s*-\s*(\d+)', duration_str)
+    if match:
+        start = int(match.group(1))
+        end = int(match.group(2))
+        total_months = end - start + 1
+        
+        # Calculate sub-range for the index-th part out of num_parts
+        part_len = total_months / num_parts
+        part_start = int(start + index * part_len)
+        part_end = int(start + (index + 1) * part_len - 1)
+        
+        # Ensure bounds
+        if part_start < start:
+            part_start = start
+        if part_end > end or index == num_parts - 1:
+            part_end = end
+        if part_end < part_start:
+            part_end = part_start
+            
+        if part_start == part_end:
+            return f"Month {part_start}"
+        else:
+            return f"Months {part_start}-{part_end}"
+            
+    # Single month case like "Month 12"
+    match_single = re.search(r'Month\s*(\d+)', duration_str, re.IGNORECASE)
+    if match_single:
+        return duration_str
+        
+    return duration_str
+
+def get_mock_marketplace(focus: Optional[str]) -> dict:
+    if not focus:
+        focus = "Academic"
+        
+    if "Academic" in focus:
+        return {
+            "macro_free": [
+                {"name": "Khan Academy Standardized Test Prep", "type": "Free Course", "why": "Excellent free resource for SAT math and reading diagnostics.", "next_step": "Complete a full-length SAT mock diagnostic test.", "tags": ["SAT", "Prep", "Math"]},
+                {"name": "MIT OpenCourseWare Calculus", "type": "YouTube/Docs", "why": "In-depth lectures to build rigorous mathematical foundation.", "next_step": "Watch Lectures 1-5 and solve problem set 1.", "tags": ["Math", "Calculus", "MIT"]}
+            ],
+            "micro_structured": [
+                {"name": "Princeton Review Advanced Prep", "type": "Course", "cost": "$299", "duration": "6 weeks", "value": "Guided instruction and score guarantee for high-stakes tests.", "next_step": "Enroll in the weekend live instruction cohort.", "tags": ["Test Prep", "SAT", "ACT"]},
+                {"name": "Coursera AP Computer Science", "type": "Certification", "cost": "$49", "duration": "4 weeks", "value": "Structured preparation matching the high school curriculum syllabus.", "next_step": "Complete modules on Object-Oriented programming.", "tags": ["AP CS", "Java", "Coding"]}
+            ],
+            "nano_expert": [
+                {"name": "Naaviverse Academic Counsel Review", "type": "Expert review", "price": "$150", "session_details": "1-on-1 Zoom Session (45 mins)", "expected_outcomes": "Personalized assessment of GPA targets and academic safety nets.", "tags": ["Counseling", "Shortlist", "GPA"]},
+                {"name": "Elite Test Prep Coaching", "type": "Coaching", "price": "$120/hr", "session_details": "Private Tutoring", "expected_outcomes": "Custom strategy to target specific weak areas in TOEFL/IELTS.", "tags": ["Tutoring", "IELTS", "TOEFL"]}
+            ]
+        }
+    elif "Practical" in focus:
+        return {
+            "macro_free": [
+                {"name": "freeCodeCamp Web Development Bootcamp", "type": "Free Course", "why": "Hands-on projects to master HTML/CSS/Javascript and Git.", "next_step": "Complete the responsive web design certification.", "tags": ["Coding", "Web Dev", "Portfolio"]},
+                {"name": "Harvard CS50 Introduction to Computer Science", "type": "YouTube/Docs", "why": "Comprehensive overview of algorithmic thinking and software development.", "next_step": "Watch Lecture 1 and submit Problem Set 1.", "tags": ["Computer Science", "Algorithms"]}
+            ],
+            "micro_structured": [
+                {"name": "Udemy AWS Certified Cloud Practitioner", "type": "Certification", "cost": "$19", "duration": "3 weeks", "value": "Learn cloud infrastructure and obtain an industry-recognized credential.", "next_step": "Complete practice exam questions and sit for the exam.", "tags": ["AWS", "Cloud", "Certification"]},
+                {"name": "Codecademy Pro Career Path", "type": "Bootcamp", "cost": "$39/mo", "duration": "Self-paced", "value": "Interactive coding workspace with portfolio projects and reviews.", "next_step": "Build and push a personal portfolio project to GitHub.", "tags": ["Coding", "Portfolio", "Interviews"]}
+            ],
+            "nano_expert": [
+                {"name": "Naavi Tech Mentor Portfolio Audit", "type": "Expert review", "price": "$120", "session_details": "Async Code Review & 30-min Call", "expected_outcomes": "Code readability review, project ideas list, and GitHub optimization tips.", "tags": ["Code Review", "Portfolio", "GitHub"]},
+                {"name": "Industry Engineer Interview Coaching", "type": "Coaching", "price": "$150/hr", "session_details": "1-on-1 Mock Coding Interview", "expected_outcomes": "Realistic technical interview simulation and problem-solving critiques.", "tags": ["Interview Prep", "Coding", "Algorithms"]}
+            ]
+        }
+    else: # Holistic
+        return {
+            "macro_free": [
+                {"name": "Toastmasters International Youth Leadership", "type": "Community", "why": "Free local clubs to build public speaking and interpersonal confidence.", "next_step": "Attend an open club meeting as a guest.", "tags": ["Public Speaking", "Leadership"]},
+                {"name": "Coursera Introduction to Public Speaking", "type": "Free Course", "why": "Learn techniques to design and deliver engaging presentations.", "next_step": "Record a 3-minute introductory speech and request feedback.", "tags": ["Communication", "Soft Skills"]}
+            ],
+            "micro_structured": [
+                {"name": "Dale Carnegie Teen Leadership Program", "type": "Course", "cost": "$395", "duration": "4 weeks", "value": "Build resilience, communication skills, and team management confidence.", "next_step": "Register for the summer leadership cohort.", "tags": ["Leadership", "Carnegie"]},
+                {"name": "Interaction Design Foundation Soft Skills", "type": "Course", "cost": "$16/mo", "duration": "Self-paced", "value": "Understand user experience, empathy, and collaborative workshop methodologies.", "next_step": "Complete the module on stakeholder communication.", "tags": ["UX", "Collaboration"]}
+            ],
+            "nano_expert": [
+                {"name": "Naavi Counselor Review & Personality Diagnostic", "type": "Expert review", "price": "$100", "session_details": "Myers-Briggs / Aptitude Zoom Session", "expected_outcomes": "Detailed profiling report highlighting soft skill strengths and growth plans.", "tags": ["Counseling", "MBTI", "Diagnostics"]},
+                {"name": "Admissions Leadership Coach", "type": "Coaching", "price": "$130/hr", "session_details": "1-on-1 Essay Story Arcs Session", "expected_outcomes": "Select compelling personal stories for leadership essays.", "tags": ["Admissions", "Coaching", "Essays"]}
+            ]
+        }
+
+def customize_steps_for_focus(steps_configs: list, focus: Optional[str], goal: str) -> list:
+    if not focus:
+        return steps_configs
+    
+    is_academic = "Academic" in focus
+    is_practical = "Practical" in focus
+    is_holistic = "Holistic" in focus
+
+    custom_configs = []
+    for step in steps_configs:
+        step_copy = step.copy()
+        title = step_copy["title"]
+        desc = step_copy["description"]
+        macro = step_copy.get("macro_view", "")
+        micro = step_copy.get("micro_view", "")
+        nano = step_copy.get("nano_view", "")
+
+        if is_academic:
+            title = title.replace("Academic Target & Profile Review", "Academic Rigor & Goal Setting Assessment") \
+                         .replace("Academic Curation & GPA Target", "Academic Curation & Advanced GPA Target") \
+                         .replace("Skill Curation & Internship Selection", "Research Paper Scoping & Academic Honors") \
+                         .replace("Skill Curation", "Research Preparation") \
+                         .replace("Internship Planning", "Academic Research Planning") \
+                         .replace("Internship Selection", "Research Mentor Selection")
+            desc = desc.replace("internships", "research projects").replace("practical skills", "theoretical insights")
+            desc += f" Prioritize academic rigor, GPA tracking, and standardized test readiness for {goal}."
+            macro = f"Focusing on academic excellence: {macro}"
+            micro = f"Execute with strict academic focus: {micro}"
+            nano = f"Mentor review of academic performance: {nano}"
+
+        elif is_practical:
+            title = title.replace("Academic Target & Profile Review", "Tech Stack Setup & Skill Review") \
+                         .replace("Academic Curation & GPA Target", "Practical Skill Setup & Git Portfolio") \
+                         .replace("Board Achievement", "Technical Certification Mastery") \
+                         .replace("Academics & Profile Rigor", "Coding Projects & Portfolio Rigor") \
+                         .replace("Test Score Curation", "Hackathon & Project Portfolio Review") \
+                         .replace("Standardized Test Prep Modules", "Practical Developer Certification Modules") \
+                         .replace("Standardized Test Prep", "Developer Certification Prep") \
+                         .replace("Standardized Test Score Curation", "Project Showcase & Hackathon Review") \
+                         .replace("Standardized Test", "Industry Certification") \
+                         .replace("Admissions Finalization & Visas", "Industry Technical Placement & Coding Reviews")
+            desc = desc.replace("board exams", "technical projects").replace("academic preparation", "technical competence").replace("standardized test", "technical certification").replace("GPA", "portfolio completeness")
+            desc += f" Emphasize GitHub projects, technical certifications, and developer bootcamps tailored for {goal}."
+            macro = f"Focusing on hands-on practical skills: {macro}"
+            micro = f"Complete coding and building deliverables: {micro}"
+            nano = f"Technical code and portfolio audits: {nano}"
+
+        elif is_holistic:
+            title = title.replace("Academic Target & Profile Review", "Leadership Assessment & Soft Skills Review") \
+                         .replace("Academic Curation & GPA Target", "Cohort Collaboration & Leadership Building") \
+                         .replace("Board Achievement", "Public Speaking & Cohort Milestones") \
+                         .replace("Academics & Profile Rigor", "Community Contributions & Counselor Reviews") \
+                         .replace("Test Score Curation", "Behavioral Interview Prep & Networking") \
+                         .replace("Standardized Test Prep Modules", "Leadership & Communication Workshop Modules") \
+                         .replace("Standardized Test Prep", "Public Speaking Coaching") \
+                         .replace("Standardized Test Score Curation", "Leadership Cohort & Community Campaigns") \
+                         .replace("Standardized Test", "Leadership & Communication Workshop")
+            desc = desc.replace("study schedules", "leadership workshops").replace("GPA", "soft skills competency").replace("test sittings", "communication bootcamps").replace("board exams", "community projects")
+            desc += f" Focus on leadership roles, behavioral counseling, public speaking, and community outreach for {goal}."
+            macro = f"Focusing on communication and peer collaboration: {macro}"
+            micro = f"Participate in workshops and group sessions: {micro}"
+            nano = f"Personality diagnostic and soft skills counseling: {nano}"
+
+        step_copy["title"] = title
+        step_copy["description"] = desc
+        step_copy["macro_view"] = macro
+        step_copy["micro_view"] = micro
+        step_copy["nano_view"] = nano
+        custom_configs.append(step_copy)
+
+    return custom_configs
+
 # Pedagogical High-Fidelity Fallback Roadmap in case of a complete API lockout
-def get_fallback_mock_roadmap(current: str, goal: str, profile: dict) -> dict:
+def get_fallback_mock_roadmap(current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, focus: Optional[str] = None) -> dict:
     grade_str = str(profile.get("grade") or "").lower() or current.lower()
     
     # Aryan's Pathway structural mapping
@@ -730,48 +902,116 @@ def get_fallback_mock_roadmap(current: str, goal: str, profile: dict) -> dict:
             }
         ]
 
+    # Parse requested steps from refine_prompt if available
+    requested_steps = None
+    if refine_prompt:
+        match_steps = re.search(r'(\d+)\s*(?:step|milestone)', refine_prompt.lower())
+        if match_steps:
+            try:
+                requested_steps = int(match_steps.group(1))
+                if requested_steps < 3:
+                    requested_steps = 3
+                elif requested_steps > 15:
+                    requested_steps = 15
+            except Exception:
+                pass
+
+    if not requested_steps and focus:
+        if "Academic" in focus:
+            pass
+        elif "Practical" in focus:
+            requested_steps = len(steps_configs) + 1
+        elif "Holistic" in focus:
+            requested_steps = max(4, len(steps_configs) - 1)
+
+    steps_configs = customize_steps_for_focus(steps_configs, focus, goal)
+
+    if requested_steps and requested_steps != len(steps_configs):
+        N = len(steps_configs)
+        M = requested_steps
+        
+        dup_counts = [0] * N
+        for j in range(M):
+            orig_idx = int(j * N / M)
+            dup_counts[orig_idx] += 1
+            
+        scaled_configs = []
+        new_id = 1
+        for orig_idx, count in enumerate(dup_counts):
+            if count == 0:
+                continue
+            orig_step = steps_configs[orig_idx]
+            for d in range(count):
+                new_step = orig_step.copy()
+                new_step["id"] = new_id
+                
+                # If there are duplicates, append Phase tag to title
+                if count > 1:
+                    new_step["title"] = f"{orig_step['title']} - Phase {d + 1}"
+                    new_step["duration"] = split_duration(orig_step["duration"], count, d)
+                
+                scaled_configs.append(new_step)
+                new_id += 1
+                
+        steps_configs = scaled_configs
+
     # Map the configurations to high-fidelity milestone structures
     macro_path = []
     for cfg in steps_configs:
+        step_title = cfg["title"]
+        step_desc = cfg["description"]
+        macro_view = cfg["macro_view"]
+        micro_view = cfg["micro_view"]
+        nano_view = cfg["nano_view"]
+
         macro_path.append({
             "id": cfg["id"],
-            "title": cfg["title"],
+            "title": step_title,
             "duration": cfg["duration"],
-            "description": cfg["description"],
+            "description": step_desc,
             "learning_objectives": [
-                f"Understand the requirements and targets of the {cfg['title']} phase.",
+                f"Understand the requirements and targets of the {step_title} phase.",
                 f"Execute the micro execution steps and checklist tasks for this milestone.",
                 f"Engage in mentor reviews and peer feedback to confirm phase readiness."
             ],
-            "macro_view": cfg["macro_view"],
-            "micro_view": cfg["micro_view"],
-            "nano_view": cfg["nano_view"],
-            "marketplace": {
-                "macro_free": [
-                    {"name": "Khan Academy Foundations", "type": "Free course", "why": "Builds fundamental insights.", "next_step": "Enroll and complete introductory units.", "tags": ["foundations", "academics"]},
-                    {"name": "YouTube College Admissions Guide", "type": "YouTube", "why": "Explains timeline and milestones.", "next_step": "Watch target playlists.", "tags": ["admissions", "planning"]}
-                ],
-                "micro_structured": [
-                    {"name": "Coursera Academic Prep Spec", "type": "Course", "cost": "Free to Audit / $49", "duration": "4 weeks", "value": "Teaches critical subject-level skills.", "next_step": "Enroll today", "tags": ["skills", "prep"]},
-                    {"name": "Official Study Prep Guide", "type": "Book", "cost": "$25", "duration": "Self-paced", "value": "Provides essential practice exercises.", "next_step": "Purchase resource", "tags": ["prep", "study"]}
-                ],
-                "nano_expert": [
-                    {"name": "Naavi Academic Advisor", "type": "Mentor", "price": "Included", "session_details": "1-on-1 session", "expected_outcomes": "Profile mapping and transition plan validation.", "tags": ["1on1", "guidance"]},
-                    {"name": "Naavi Cohort Review", "type": "Expert review", "price": "Included", "session_details": "Review portal", "expected_outcomes": "Detailed output review and checklist rating.", "tags": ["review", "feedback"]}
-                ]
-            },
+            "macro_view": macro_view,
+            "micro_view": micro_view,
+            "nano_view": nano_view,
+            "marketplace": get_mock_marketplace(focus),
             "micro_steps": [
-                {"task": f"Define and document goals for the {cfg['title']} phase", "resource": "Google Docs / Notion"},
-                {"task": f"Complete diagnostic sittings or task execution for {cfg['title']}", "resource": "Practice Portals"},
+                {"task": f"Define and document goals for the {step_title} phase", "resource": "Google Docs / Notion"},
+                {"task": f"Complete diagnostic sittings or task execution for {step_title}", "resource": "Practice Portals"},
                 {"task": f"Review execution output with mentor or advisor", "resource": "Naavi Platform"}
             ]
         })
 
+    path_title = f"Academic Pathway to {goal}"
+    path_description = f"A comprehensive pedagogical blueprint designed to take a student from {current} to the target academic goal: {goal}."
+    readiness_score = 30
+    readiness_label = "Early Starter"
+
+    if focus:
+        if "Academic" in focus:
+            path_title = f"Academic & Research Pathway to {goal}"
+            path_description = f"A highly rigorous academic and research-oriented roadmap designed to maximize GPA, master standardized test prep (SAT/ACT/IELTS/TOEFL), secure academic honors, publish research, and build a competitive profile for top-tier university placement in {goal}."
+            readiness_score = 40
+            readiness_label = "Intermediate Starter"
+        elif "Practical" in focus:
+            path_title = f"Practical & Industry Pathway to {goal}"
+            path_description = f"A hands-on, project-centric roadmap focusing on building technical skills, industry-recognized professional certifications, real-world portfolio projects, and securing industrial internships to prepare for {goal}."
+            readiness_score = 35
+            readiness_label = "Early Builder"
+        elif "Holistic" in focus:
+            path_title = f"Holistic & Career-Prep Pathway to {goal}"
+            path_description = f"A comprehensive development roadmap focusing on leadership, public speaking, soft skills, peer cohort networking, community service, expert counseling, and career preparation workshops for {goal}."
+            readiness_score = 45
+            readiness_label = "Aspirant Leader"
+
     return {
-        "path_title": f"Academic Pathway to {goal}",
-        "path_description": f"A comprehensive pedagogical blueprint designed to take a student from {current} to the target academic goal: {goal}.",
-        "readiness_score": 30,
-        "readiness_label": "Early Starter",
+        "path_title": path_title,
+        "path_description": path_description,
+        "readiness_score": readiness_score,
+        "readiness_label": readiness_label,
         "total_duration": total_duration,
         "blind_spots": [
             "Lacks formal international exposure - needs IELTS/SAT preparation.",
@@ -780,19 +1020,102 @@ def get_fallback_mock_roadmap(current: str, goal: str, profile: dict) -> dict:
         "macro_path": macro_path
     }
 
+def scale_blueprint_steps(blueprint: dict, requested_steps: int) -> dict:
+    macro_path = blueprint.get("macro_path", [])
+    if not macro_path or len(macro_path) == requested_steps:
+        return blueprint
+        
+    N = len(macro_path)
+    M = requested_steps
+    
+    dup_counts = [0] * N
+    for j in range(M):
+        orig_idx = int(j * N / M)
+        dup_counts[orig_idx] += 1
+        
+    scaled_path = []
+    new_id = 1
+    for orig_idx, count in enumerate(dup_counts):
+        if count == 0:
+            continue
+        orig_step = macro_path[orig_idx]
+        for d in range(count):
+            new_step = orig_step.copy()
+            new_step["id"] = new_id
+            
+            # If there are duplicates, append Phase tag to title
+            if count > 1:
+                new_step["title"] = f"{orig_step['title']} - Phase {d + 1}"
+                new_step["duration"] = split_duration(orig_step["duration"], count, d)
+            
+            scaled_path.append(new_step)
+            new_id += 1
+            
+    blueprint["macro_path"] = scaled_path
+    return blueprint
+
 # Specialized Audit Tasks
-async def run_agent_1_blueprint(current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> dict:
+async def run_agent_1_blueprint(current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None, focus: Optional[str] = None) -> dict:
+    # Parse requested steps from refine_prompt if available
+    requested_steps = None
+    if refine_prompt:
+        match_steps = re.search(r'(\d+)\s*(?:step|milestone)', refine_prompt.lower())
+        if match_steps:
+            try:
+                requested_steps = int(match_steps.group(1))
+                if requested_steps < 3:
+                    requested_steps = 3
+                elif requested_steps > 15:
+                    requested_steps = 15
+            except Exception:
+                pass
+
+    focus_title_prefix = "Academic & Research"
+    focus_area = "academic and profile development"
+    if focus:
+        if "Academic" in focus:
+            focus_title_prefix = "Academic & Research"
+            focus_area = "academic rigor, target grades, standardized test prep (SAT/ACT/IELTS/TOEFL), academic honors, research papers, curriculum rigor, and top-tier university placement"
+        elif "Practical" in focus:
+            focus_title_prefix = "Practical & Industry"
+            focus_area = "technical/hands-on skill acquisition, portfolio development, coding/engineering projects, professional certifications, industry internships, and practical deliverables"
+        elif "Holistic" in focus:
+            focus_title_prefix = "Holistic & Career-Prep"
+            focus_area = "peer cohorts, soft skills, public speaking, open-source contributions, self-paced courses, expert counselor reviews, and career counseling sessions"
+
     prompt = AGENT_1_PROMPT.format(
         current_position=current,
         target_goal=goal,
-        profile=json.dumps(profile)
+        profile=json.dumps(profile),
+        focus_title_prefix=focus_title_prefix,
+        focus_area=focus_area
     )
+    if focus:
+        prompt += f"\n\n🚨 STRATEGIC FOCUS DIRECTION: You MUST structure and customize this pathway according to this specific strategic focus direction:\n👉 \"{focus}\"\nEnsure all milestone titles, descriptions, objectives, learning views, checklists, and resources strongly reflect this focus so that it stands out distinctly from other alternative options."
+
     if refine_prompt:
         prompt += f"\n\n==================================================\nCRITICAL USER REQUEST FOR REFINE / ADJUSTMENT:\nThe user has requested the following specific instruction to refine/adjust this pathway. You MUST strictly adhere to and execute this instruction in your output:\n👉 \"{refine_prompt}\"\n==================================================\n"
+        if requested_steps:
+            prompt += f"\n\n🚨 CRITICAL ENFORCEMENT: The user has explicitly requested EXACTLY {requested_steps} steps/milestones. You MUST ignore any conflicting default step count rules and generate EXACTLY {requested_steps} distinct step objects inside the 'macro_path' JSON array. Do not output more or fewer than {requested_steps} steps. Ensure they have IDs 1 to {requested_steps}."
         if existing_roadmap:
-            roadmap_to_send = existing_roadmap.get("roadmap_data") or existing_roadmap
-            prompt += f"\nEXISTING ROADMAP (use this as the base reference to modify only what the user requested, leaving other steps unchanged):\n{json.dumps(roadmap_to_send, indent=2)}\n"
-    print("[Agent 1] Generating initial roadmap blueprint using 70B...")
+            raw_roadmap = existing_roadmap.get("roadmap_data") or existing_roadmap
+            # Context compression: Only send metadata to save thousands of tokens and avoid TPM limit
+            compressed_roadmap = {
+                "path_title": raw_roadmap.get("path_title", ""),
+                "path_description": raw_roadmap.get("path_description", ""),
+                "total_duration": raw_roadmap.get("total_duration", ""),
+                "macro_path": [
+                    {
+                        "id": m.get("id"),
+                        "title": m.get("title", ""),
+                        "duration": m.get("duration", ""),
+                        "description": m.get("description", "")
+                    }
+                    for m in raw_roadmap.get("macro_path", [])
+                ]
+            }
+            prompt += f"\nEXISTING ROADMAP (use this as the base reference to modify only what the user requested, leaving other steps unchanged):\n{json.dumps(compressed_roadmap, indent=2)}\n"
+    print(f"[Agent 1] Generating initial roadmap blueprint (focus: {focus or 'default'}) using 70B...")
     res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
     
     # If the daily token limit is exhausted, query_groq_json returns {}
@@ -802,7 +1125,10 @@ async def run_agent_1_blueprint(current: str, goal: str, profile: dict, refine_p
         res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
         if not res or "macro_path" not in res:
             # Full lockout: serve high-fidelity static mock custom-built for CBSE/Cambridge
-            return get_fallback_mock_roadmap(current, goal, profile)
+            return get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus)
+            
+    if requested_steps and res:
+        res = scale_blueprint_steps(res, requested_steps)
     return res
 
 async def run_agent_2_path_auditor(blueprint: dict, current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> dict:
@@ -953,27 +1279,40 @@ async def build_and_store_final_path(
         final_json = recursive_sanitize(final_json, name_tokens)
         print("[Sanitizer] Personal name sanitization complete.")
 
-    email = profile.get("email") if profile else None
-    path_doc = {
-        "query": f"Current: {current}. Goal: {goal}.",
-        "current_position": current,
-        "target_goal": goal,
-        "profile": profile,
-        "roadmap_data": final_json,
-        "status": "under_admin_review",
-        "created_at": datetime.datetime.now(datetime.timezone.utc),
-        "created_by": email,
-        "createdBy": email
-    }
-
-    insert_result = await pending_paths_collection.insert_one(path_doc)
-    final_json["db_id"] = str(insert_result.inserted_id)
-    final_json["status"] = "under_admin_review"
-    print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
+    final_json["db_id"] = None
+    final_json["status"] = "draft"
     return final_json
 
 
 # ─── API ENDPOINTS ────────────────────────────────────────────────────────
+
+@app.post("/api/login")
+async def login(req: LoginRequest):
+    admin_email = os.environ.get("ADMIN_USERNAME", "pathengine.admin@gmail.com")
+    admin_password = os.environ.get("ADMIN_PASSWORD", "Pathadmin@123")
+    
+    if req.email.lower() == admin_email.lower() and req.password == admin_password:
+        admin_profile = await profiles_collection.find_one({"email": admin_email.lower()})
+        if not admin_profile:
+            admin_profile = {
+                "email": admin_email.lower(),
+                "name": "PathEngine Admin",
+                "grade": "",
+                "curriculum": "",
+                "stream": "",
+                "school": "",
+                "performance": "",
+                "financialSituation": "",
+                "personality": "",
+                "country": "",
+                "state": "",
+                "city": "",
+                "created_at": datetime.datetime.now(datetime.timezone.utc)
+            }
+            await profiles_collection.insert_one(admin_profile)
+        return serialize_mongo_doc(admin_profile)
+    else:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 @app.post("/api/profile")
 async def save_profile(profile: StudentProfileModel):
@@ -1003,11 +1342,28 @@ async def save_profile(profile: StudentProfileModel):
 
 @app.get("/api/profile/{email}")
 async def get_profile(email: str):
+    admin_email = os.environ.get("ADMIN_USERNAME", "pathengine.admin@gmail.com")
+    if email.lower() == admin_email.lower():
+        raise HTTPException(status_code=403, detail="Direct access to admin profile is forbidden. Please use /api/login.")
     doc = await profiles_collection.find_one({"email": email.lower()})
     if not doc:
         raise HTTPException(status_code=404, detail="Profile not found")
     return serialize_mongo_doc(doc)
 
+
+async def run_option_audits(blueprint: dict, current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None):
+    agent2_task = run_agent_2_path_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
+    agent3_task = run_agent_3_steps_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
+    agent4_task = run_agent_4_marketplace_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
+    
+    path_audit, steps_audit, market_audit = await asyncio.gather(
+        agent2_task, agent3_task, agent4_task,
+        return_exceptions=True
+    )
+    if isinstance(path_audit, Exception): path_audit = {}
+    if isinstance(steps_audit, Exception): steps_audit = []
+    if isinstance(market_audit, Exception): market_audit = []
+    return path_audit, steps_audit, market_audit
 
 @app.post("/api/path/stream")
 async def generate_path_stream(req: PathGenerationRequest):
@@ -1016,6 +1372,7 @@ async def generate_path_stream(req: PathGenerationRequest):
     profile = req.profile or {}
     refine_prompt = req.refine_prompt.strip() if req.refine_prompt else None
     existing_roadmap = req.existing_roadmap
+    focus_req = req.focus.strip() if req.focus else None
 
     if not current or not goal:
         raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
@@ -1024,94 +1381,115 @@ async def generate_path_stream(req: PathGenerationRequest):
         completed = []
         started_at = time.perf_counter()
         try:
+            if refine_prompt:
+                val = refine_prompt.lower().strip()
+                noise = [
+                    "tell me a story", "tell a story", "write a story", "write a poem", "write a song",
+                    "tell me a joke", "tell a joke", "joke", "weather", "capital of", "who is",
+                    "what is the meaning of life", "hi", "hello", "hey", "how are you", "what's up",
+                    "sing a song", "write code", "help me chat", "how are you doing"
+                ]
+                valid_keywords = [
+                    "step", "milestone", "path", "road", "course", "market", "description", "objective",
+                    "duration", "add", "change", "remove", "delete", "update", "make", "give", "focus",
+                    "study", "prep", "sat", "ielts", "act", "toefl", "exam", "career", "university",
+                    "college", "school", "curriculum", "grade", "subject", "class", "detail", "more",
+                    "resource", "mentor", "timeline", "month", "year", "academics", "score", "placement",
+                    "portfolio", "admission", "ielts", "gpa", "internship", "project"
+                ]
+                if any(n in val for n in noise) or len(val) < 4 or not any(kw in val for kw in valid_keywords):
+                    yield sse_payload("error", {"message": "This request is irrelevant to career pathway refinement. Please provide specific instructions to adjust this pathway, such as 'change step 1 description' or 'add more milestones'."})
+                    return
+
             yield sse_payload("status", {
                 "statuses": build_agent_statuses("agent1", completed),
                 "progress": 20,
-                "message": "Analyzing your profile..."
+                "message": "Generating alternative blueprint paths..."
             })
-            blueprint = await run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap)
-            if blueprint and "error" in blueprint:
-                yield sse_payload("error", {"message": blueprint["error"]})
-                return
+
+            foci = [
+                "Academic Focus: Focus on school exams, target grades, standardized test prep (SAT/ACT/IELTS/TOEFL), academic honors, research papers, curriculum rigor, and top-tier university placement.",
+                "Practical Focus: Focus on technical/hands-on skill acquisition, portfolio development, coding/engineering projects, professional certifications, industry internships, and practical deliverables.",
+                "Holistic Focus: Focus on peer cohorts, soft skills, public speaking, open-source contributions, self-paced courses, expert counselor reviews, and career counseling sessions."
+            ]
+            option_names = ["Academic & Research", "Practical & Industry", "Holistic & Career-Prep"]
+
+            if focus_req:
+                matched_idx = None
+                for idx, name in enumerate(option_names):
+                    if focus_req.lower() in name.lower() or name.lower() in focus_req.lower():
+                        matched_idx = idx
+                        break
+                if matched_idx is not None:
+                    foci = [foci[matched_idx]]
+                    option_names = [option_names[matched_idx]]
+
+            # 1. Run Agent 1 in parallel
+            blueprint_tasks = [
+                run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap, focus=focus)
+                for focus in foci
+            ]
+            blueprints = await asyncio.gather(*blueprint_tasks, return_exceptions=True)
+
+            valid_blueprints = []
+            for i, bp in enumerate(blueprints):
+                if isinstance(bp, Exception) or not bp or "macro_path" not in bp:
+                    print(f"Blueprint {i} generation failed or returned error. Falling back.")
+                    valid_blueprints.append(get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus=foci[i]))
+                else:
+                    valid_blueprints.append(bp)
+
             completed.append("agent1")
             yield sse_payload("status", {
-                "statuses": build_agent_statuses(None, completed),
-                "progress": 20,
-                "message": "Profile analysis complete."
-            })
-
-            yield sse_payload("status", {
                 "statuses": build_agent_statuses("agent2", completed),
-                "progress": 40,
-                "message": "Building your roadmap..."
-            })
-            try:
-                path_audit = await run_agent_2_path_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
-            except Exception as e:
-                print(f"Agent 2 Error: {e}")
-                path_audit = {}
-            completed.append("agent2")
-            yield sse_payload("status", {
-                "statuses": build_agent_statuses(None, completed),
-                "progress": 40,
-                "message": "Roadmap structure complete."
+                "progress": 50,
+                "message": "Auditing and refining pathway options..."
             })
 
-            yield sse_payload("status", {
-                "statuses": build_agent_statuses("agent3", completed),
-                "progress": 60,
-                "message": "Refining milestones and checklists..."
-            })
-            try:
-                steps_audit = await run_agent_3_steps_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
-            except Exception as e:
-                print(f"Agent 3 Error: {e}")
-                steps_audit = []
-            completed.append("agent3")
-            yield sse_payload("status", {
-                "statuses": build_agent_statuses(None, completed),
-                "progress": 60,
-                "message": "Milestones and checklists complete."
-            })
+            # 2. Run Audits in parallel for all options
+            audit_tasks = [
+                run_option_audits(bp, current, goal, profile, refine_prompt, existing_roadmap)
+                for bp in valid_blueprints
+            ]
+            audit_results = await asyncio.gather(*audit_tasks, return_exceptions=True)
 
-            yield sse_payload("status", {
-                "statuses": build_agent_statuses("agent4", completed),
-                "progress": 80,
-                "message": "Finding learning resources..."
-            })
-            try:
-                market_audit = await run_agent_4_marketplace_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
-            except Exception as e:
-                print(f"Agent 4 Error: {e}")
-                market_audit = []
-            completed.append("agent4")
-            yield sse_payload("status", {
-                "statuses": build_agent_statuses(None, completed),
-                "progress": 80,
-                "message": "Learning resources complete."
-            })
-
+            completed.extend(["agent2", "agent3", "agent4"])
             yield sse_payload("status", {
                 "statuses": build_agent_statuses("ready", completed),
-                "progress": 95,
+                "progress": 90,
                 "message": "Preparing final recommendations..."
             })
-            final_json = await build_and_store_final_path(
-                blueprint, path_audit, steps_audit, market_audit, current, goal, profile
-            )
+
+            # 3. Merge outputs
+            final_alternatives = []
+            for i, bp in enumerate(valid_blueprints):
+                res = audit_results[i]
+                if isinstance(res, Exception):
+                    path_audit, steps_audit, market_audit = {}, [], []
+                else:
+                    path_audit, steps_audit, market_audit = res
+
+                final_json = await build_and_store_final_path(
+                    bp, path_audit, steps_audit, market_audit, current, goal, profile
+                )
+                final_json["option_name"] = option_names[i]
+                final_alternatives.append(final_json)
+
             completed.append("ready")
             elapsed = time.perf_counter() - started_at
-            print(f"[Audit API] Agent audit and cache completed in {elapsed:.2f} seconds.")
+            print(f"[Audit API] Alternate paths generation and audits completed in {elapsed:.2f} seconds.")
             yield sse_payload("status", {
                 "statuses": build_agent_statuses(None, completed),
                 "progress": 100,
-                "message": "Your career path is ready!"
+                "message": "Your alternate career paths are ready!"
             })
-            yield sse_payload("result", final_json)
+            yield sse_payload("result", {
+                "alternatives": final_alternatives
+            })
         except Exception as e:
             print(f"[Streamed Path Error] {e}")
             yield sse_payload("error", {
-                "message": "Path generation failed. Please try again."
+                "message": f"Path generation failed: {str(e)}. Please try again."
             })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -1123,133 +1501,116 @@ async def generate_path(req: PathGenerationRequest):
     profile = req.profile or {}
     refine_prompt = req.refine_prompt.strip() if req.refine_prompt else None
     existing_roadmap = req.existing_roadmap
+    focus_req = req.focus.strip() if req.focus else None
     
     if not current or not goal:
         raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
     
+    if refine_prompt:
+        val = refine_prompt.lower().strip()
+        noise = [
+            "tell me a story", "tell a story", "write a story", "write a poem", "write a song",
+            "tell me a joke", "tell a joke", "joke", "weather", "capital of", "who is",
+            "what is the meaning of life", "hi", "hello", "hey", "how are you", "what's up",
+            "sing a song", "write code", "help me chat", "how are you doing"
+        ]
+        valid_keywords = [
+            "step", "milestone", "path", "road", "course", "market", "description", "objective",
+            "duration", "add", "change", "remove", "delete", "update", "make", "give", "focus",
+            "study", "prep", "sat", "ielts", "act", "toefl", "exam", "career", "university",
+            "college", "school", "curriculum", "grade", "subject", "class", "detail", "more",
+            "resource", "mentor", "timeline", "month", "year", "academics", "score", "placement",
+            "portfolio", "admission", "ielts", "gpa", "internship", "project"
+        ]
+        if any(n in val for n in noise) or len(val) < 4 or not any(kw in val for kw in valid_keywords):
+            raise HTTPException(status_code=400, detail="This request is irrelevant to career pathway refinement. Please provide specific instructions to adjust this pathway, such as 'change step 1 description' or 'add more milestones'.")
+
     try:
-        # Step 1: Run Agent 1 (Blueprint Generator)
-        blueprint = await run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap)
-        if blueprint and "error" in blueprint:
-            raise HTTPException(status_code=400, detail=blueprint["error"])
+        foci = [
+            "Academic Focus: Focus on school exams, target grades, standardized test prep (SAT/ACT/IELTS/TOEFL), academic honors, research papers, curriculum rigor, and top-tier university placement.",
+            "Practical Focus: Focus on technical/hands-on skill acquisition, portfolio development, coding/engineering projects, professional certifications, industry internships, and practical deliverables.",
+            "Holistic Focus: Focus on peer cohorts, soft skills, public speaking, open-source contributions, self-paced courses, expert counselor reviews, and career counseling sessions."
+        ]
+        option_names = ["Academic & Research", "Practical & Industry", "Holistic & Career-Prep"]
+
+        if focus_req:
+            matched_idx = None
+            for idx, name in enumerate(option_names):
+                if focus_req.lower() in name.lower() or name.lower() in focus_req.lower():
+                    matched_idx = idx
+                    break
+            if matched_idx is not None:
+                foci = [foci[matched_idx]]
+                option_names = [option_names[matched_idx]]
+
+        # 1. Run Agent 1 in parallel
+        blueprint_tasks = [
+            run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap, focus=focus)
+            for focus in foci
+        ]
+        blueprints = await asyncio.gather(*blueprint_tasks, return_exceptions=True)
         
-        # Step 2: Trigger Agents 2, 3, and 4 in parallel using asyncio.gather
-        agent2_task = run_agent_2_path_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
-        agent3_task = run_agent_3_steps_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
-        agent4_task = run_agent_4_marketplace_auditor(blueprint, current, goal, profile, refine_prompt, existing_roadmap)
+        valid_blueprints = []
+        for i, bp in enumerate(blueprints):
+            if isinstance(bp, Exception) or not bp or "macro_path" not in bp:
+                valid_blueprints.append(get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus=foci[i]))
+            else:
+                valid_blueprints.append(bp)
+                
+        # 2. Run Audits in parallel
+        audit_tasks = [
+            run_option_audits(bp, current, goal, profile, refine_prompt, existing_roadmap)
+            for bp in valid_blueprints
+        ]
+        audit_results = await asyncio.gather(*audit_tasks, return_exceptions=True)
         
-        path_audit, steps_audit, market_audit = await asyncio.gather(
-            agent2_task, agent3_task, agent4_task,
-            return_exceptions=True
-        )
-        
-        # Handle exceptions gracefully
-        if isinstance(path_audit, Exception): 
-            print(f"Agent 2 Error: {path_audit}")
-            path_audit = {}
-        if isinstance(steps_audit, Exception): 
-            print(f"Agent 3 Error: {steps_audit}")
-            steps_audit = []
-        if isinstance(market_audit, Exception): 
-            print(f"Agent 4 Error: {market_audit}")
-            market_audit = []
-        
-        # Step 3: Merge parallel agent outputs
-        final_macro_path = []
-        blueprint_milestones = blueprint.get("macro_path", [])
-        
-        for i, orig_milestone in enumerate(blueprint_milestones):
-            m_id = orig_milestone.get("id", i + 1)
+        # 3. Merge
+        final_alternatives = []
+        for i, bp in enumerate(valid_blueprints):
+            res = audit_results[i]
+            if isinstance(res, Exception):
+                path_audit, steps_audit, market_audit = {}, [], []
+            else:
+                path_audit, steps_audit, market_audit = res
+                
+            final_json = await build_and_store_final_path(
+                bp, path_audit, steps_audit, market_audit, current, goal, profile
+            )
+            final_json["option_name"] = option_names[i]
+            final_alternatives.append(final_json)
             
-            # Fetch step details and views audited by Agent 3
-            audited_step = next((m for m in steps_audit if m.get("id") == m_id), {})
-            
-            # Fetch marketplace audited by Agent 4
-            audited_market = next((m.get("marketplace") for m in market_audit if m.get("id") == m_id), None)
-            
-            merged_milestone = {
-                "id": m_id,
-                "title": audited_step.get("title") or orig_milestone.get("title", f"Milestone {m_id}"),
-                "duration": audited_step.get("duration") or orig_milestone.get("duration", "3 months"),
-                "description": audited_step.get("description") or orig_milestone.get("description", ""),
-                "learning_objectives": audited_step.get("learning_objectives") or orig_milestone.get("learning_objectives", []),
-                "macro_view": audited_step.get("macro_view") or orig_milestone.get("macro_view", ""),
-                "micro_view": audited_step.get("micro_view") or orig_milestone.get("micro_view", ""),
-                "nano_view": audited_step.get("nano_view") or orig_milestone.get("nano_view", ""),
-                "marketplace": audited_market or orig_milestone.get("marketplace") or {"macro_free": [], "micro_structured": [], "nano_expert": []},
-                "micro_steps": audited_step.get("micro_steps") or orig_milestone.get("micro_steps") or []
-            }
-            final_macro_path.append(merged_milestone)
-        
-        final_json = {
-            "path_title": path_audit.get("path_title") or blueprint.get("path_title") or f"Academic Pathway to {goal}",
-            "path_description": path_audit.get("path_description") or blueprint.get("path_description") or f"Detailed strategy blueprint for achieving target goal: {goal}.",
-            "readiness_score": path_audit.get("readiness_score") or blueprint.get("readiness_score", 15),
-            "readiness_label": path_audit.get("readiness_label") or blueprint.get("readiness_label", "Standard Grade"),
-            "total_duration": blueprint.get("total_duration", "12 months"),
-            "macro_path": final_macro_path,
-            "blind_spots": path_audit.get("blind_spots") or blueprint.get("blind_spots") or []
-        }
-        
-        # Step 3.5: Post-process — sanitize all personal names out of the final JSON
-        name_tokens = build_name_patterns(profile, current)
-        if name_tokens:
-            print(f"[Sanitizer] Scrubbing personal name tokens: {name_tokens}")
-            final_json = recursive_sanitize(final_json, name_tokens)
-            print("[Sanitizer] Personal name sanitization complete.")
-        
-        email = profile.get("email") if profile else None
-        # Step 4: Persist to MongoDB with 'under_admin_review' status
-        path_doc = {
-            "query": f"Current: {current}. Goal: {goal}.",
-            "current_position": current,
-            "target_goal": goal,
-            "profile": profile,
-            "roadmap_data": final_json,
-            "status": "under_admin_review",
-            "created_at": datetime.datetime.now(datetime.timezone.utc),
-            "created_by": email,
-            "createdBy": email
-        }
-        
-        insert_result = await pending_paths_collection.insert_one(path_doc)
-        final_json["db_id"] = str(insert_result.inserted_id)
-        final_json["status"] = "under_admin_review"
-        
-        print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
-        return final_json
+        return {"alternatives": final_alternatives}
         
     except Exception as e:
-        print(f"[AI Pipeline Warning] Exception occurred during generation: {e}. Recovering with fallback roadmap.")
-        final_json = get_fallback_mock_roadmap(current, goal, profile)
-        name_tokens = build_name_patterns(profile, current)
-        if name_tokens:
-            final_json = recursive_sanitize(final_json, name_tokens)
+        print(f"[AI Pipeline Warning] Exception occurred during generation: {e}. Recovering with fallbacks.")
+        final_alternatives = []
+        foci = [
+            "Academic Focus: Focus on school exams, target grades, standardized test prep (SAT/ACT/IELTS/TOEFL), academic honors, research papers, curriculum rigor, and top-tier university placement.",
+            "Practical Focus: Focus on technical/hands-on skill acquisition, portfolio development, coding/engineering projects, professional certifications, industry internships, and practical deliverables.",
+            "Holistic Focus: Focus on peer cohorts, soft skills, public speaking, open-source contributions, self-paced courses, expert counselor reviews, and career counseling sessions."
+        ]
+        option_names = ["Academic & Research", "Practical & Industry", "Holistic & Career-Prep"]
         
-        # Try to persist fallback to MongoDB
-        try:
-            email = profile.get("email") if profile else None
-            path_doc = {
-                "query": f"Current: {current}. Goal: {goal}.",
-                "current_position": current,
-                "target_goal": goal,
-                "profile": profile,
-                "roadmap_data": final_json,
-                "status": "under_admin_review",
-                "created_at": datetime.datetime.now(datetime.timezone.utc),
-                "created_by": email,
-                "createdBy": email
-            }
-            insert_result = await pending_paths_collection.insert_one(path_doc)
-            final_json["db_id"] = str(insert_result.inserted_id)
-            final_json["status"] = "under_admin_review"
-            print(f"[MongoDB] Cached fallback roadmap {final_json['db_id']} under review successfully.")
-        except Exception as db_err:
-            print(f"[MongoDB Warning] Failed to cache fallback roadmap to database: {db_err}")
-            final_json["db_id"] = "fallback_mock_id"
-            final_json["status"] = "under_admin_review"
-            
-        return final_json
+        if focus_req:
+            matched_idx = None
+            for idx, name in enumerate(option_names):
+                if focus_req.lower() in name.lower() or name.lower() in focus_req.lower():
+                    matched_idx = idx
+                    break
+            if matched_idx is not None:
+                foci = [foci[matched_idx]]
+                option_names = [option_names[matched_idx]]
+
+        for i in range(len(foci)):
+            final_json = get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus=foci[i])
+            name_tokens = build_name_patterns(profile, current)
+            if name_tokens:
+                final_json = recursive_sanitize(final_json, name_tokens)
+            final_json["db_id"] = None
+            final_json["status"] = "draft"
+            final_json["option_name"] = option_names[i]
+            final_alternatives.append(final_json)
+        return {"alternatives": final_alternatives}
 
 
 @app.post("/api/path/blueprint")
@@ -1348,27 +1709,11 @@ async def generate_path_audit(req: PathAuditRequest):
             final_json = recursive_sanitize(final_json, name_tokens)
             print("[Sanitizer] Personal name sanitization complete.")
         
-        email = profile.get("email") if profile else None
-        # Persist to MongoDB with 'under_admin_review' status
-        path_doc = {
-            "query": f"Current: {current}. Goal: {goal}.",
-            "current_position": current,
-            "target_goal": goal,
-            "profile": profile,
-            "roadmap_data": final_json,
-            "status": "under_admin_review",
-            "created_at": datetime.datetime.now(datetime.timezone.utc),
-            "created_by": email,
-            "createdBy": email
-        }
-        
-        insert_result = await pending_paths_collection.insert_one(path_doc)
-        final_json["db_id"] = str(insert_result.inserted_id)
-        final_json["status"] = "under_admin_review"
+        final_json["db_id"] = None
+        final_json["status"] = "draft"
         
         elapsed = time.time() - start_time
-        print(f"[MongoDB] Cached roadmap {final_json['db_id']} under review successfully.")
-        print(f"[Audit API] Parallel audit and cache completed in {elapsed:.2f} seconds.")
+        print(f"[Audit API] Parallel audit completed in {elapsed:.2f} seconds.")
         return final_json
         
     except Exception as e:
@@ -1378,26 +1723,8 @@ async def generate_path_audit(req: PathAuditRequest):
         if name_tokens:
             final_json = recursive_sanitize(final_json, name_tokens)
         
-        try:
-            email = profile.get("email") if profile else None
-            path_doc = {
-                "query": f"Current: {current}. Goal: {goal}.",
-                "current_position": current,
-                "target_goal": goal,
-                "profile": profile,
-                "roadmap_data": final_json,
-                "status": "under_admin_review",
-                "created_at": datetime.datetime.now(datetime.timezone.utc),
-                "created_by": email,
-                "createdBy": email
-            }
-            insert_result = await pending_paths_collection.insert_one(path_doc)
-            final_json["db_id"] = str(insert_result.inserted_id)
-            final_json["status"] = "under_admin_review"
-        except Exception:
-            final_json["db_id"] = "fallback_mock_id"
-            final_json["status"] = "under_admin_review"
-            
+        final_json["db_id"] = None
+        final_json["status"] = "draft"
         return final_json
 
 
@@ -1561,6 +1888,38 @@ async def update_path(path_id: str, req: UpdatePathRequest):
         return {"message": f"Successfully updated career path status to {req.status}", "status": req.status}
         
     raise HTTPException(status_code=404, detail="Career path not found")
+
+
+@app.post("/api/paths/save")
+async def save_path(req: SavePathRequest):
+    current = req.current_position.strip()
+    goal = req.target_goal.strip()
+    profile = req.profile or {}
+    roadmap_data = req.roadmap_data
+    
+    if not current or not goal:
+        raise HTTPException(status_code=400, detail="Current position and Target goal cannot be empty")
+        
+    email = profile.get("email") if profile else None
+    
+    path_doc = {
+        "query": f"Current: {current}. Goal: {goal}.",
+        "current_position": current,
+        "target_goal": goal,
+        "profile": profile,
+        "roadmap_data": roadmap_data,
+        "status": "under_admin_review",
+        "created_at": datetime.datetime.now(datetime.timezone.utc),
+        "created_by": email,
+        "createdBy": email
+    }
+    
+    insert_result = await pending_paths_collection.insert_one(path_doc)
+    
+    return {
+        "message": "Path saved successfully for admin review",
+        "db_id": str(insert_result.inserted_id)
+    }
 
 
 # Serve React frontend if built

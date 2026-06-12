@@ -419,6 +419,47 @@
   }
 }
 
+.editor-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-regenerate-admin {
+  background: transparent;
+  color: var(--text2);
+  border: 1.5px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  &:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  &:hover:not(:disabled) {
+    background: var(--bg);
+    border-color: var(--text3);
+    color: var(--text);
+    transform: translateY(-1px);
+
+    svg {
+      transform: rotate(45deg);
+    }
+  }
+
+  &:active:not(:disabled) { transform: translateY(0); }
+
+  svg {
+    transition: transform 0.3s ease;
+  }
+}
+
 /* ── Global metrics card ──────────────────────────────────── */
 .ar-editor-stats-card {
   padding: 20px 22px;
@@ -1118,3 +1159,70 @@
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Admin Alternatives Selector Tabs ─────────────────────── */
+.ar-alt-tabs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+
+  .ar-alt-tabs-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+}
+
+.ar-alt-tabs {
+  display: flex;
+  background: var(--bg3);
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  gap: 6px;
+}
+
+.ar-alt-tab-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 16px;
+  background: transparent;
+  color: var(--text3);
+  border: none;
+  border-radius: 9px;
+  font-family: 'Poppins', var(--font-body), sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+
+  .tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: transparent;
+    transition: all 0.2s;
+  }
+
+  &:hover {
+    color: var(--text2);
+    background: rgba(255, 255, 255, 0.5);
+  }
+
+  &.active {
+    color: var(--text);
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+
+    &:nth-child(1) .tab-dot { background: var(--green); }
+    &:nth-child(2) .tab-dot { background: var(--blue); }
+    &:nth-child(3) .tab-dot { background: var(--red); }
+  }
+}

@@ -24,17 +24,26 @@ function clearSession() {
 
 // ── Field configs ─────────────────────────────────────────
 const PROFILE_FIELDS = [
-  { key: "name",              label: "Full Name",           type: "text",   placeholder: "e.g. Aparna Ponnuru" },
-  { key: "grade",             label: "Grade / Class",       type: "text",   placeholder: "e.g. Grade 9, Class 11, B.Tech 2nd year" },
-  { key: "curriculum",        label: "Curriculum / Board",  type: "select", options: ["CBSE", "ICSE", "State Board", "IB", "IGCSE", "University", "Other"] },
-  { key: "stream",            label: "Stream",              type: "select", options: ["Science", "Commerce", "Arts", "Engineering", "Other"] },
-  { key: "school",            label: "School / College",    type: "text",   placeholder: "e.g. Delhi Public School" },
-  { key: "performance",       label: "Academic Performance",type: "select", options: ["Below 60%", "60%–74%", "75%–89%", "90% and above"] },
-  { key: "financialSituation",label: "Financial Situation", type: "select", options: ["Limited budget", "Moderate budget", "Comfortable — can invest in premium courses/coaching"] },
-  { key: "personality",       label: "Personality Type",    type: "select", options: ["Introvert", "Extrovert", "Ambivert", "Social — I thrive working with and helping people", "Analytical — I prefer working with data and logic", "Creative — I enjoy building and designing things"] },
-  { key: "country",           label: "Country",             type: "text",   placeholder: "e.g. India" },
-  { key: "state",             label: "State",               type: "text",   placeholder: "e.g. Telangana" },
-  { key: "city",              label: "City",                type: "text",   placeholder: "e.g. Hyderabad" },
+  { key: "name", label: "Full Name", type: "text", placeholder: "e.g. Aparna Ponnuru" },
+  { key: "grade", label: "Grade / Class", type: "text", placeholder: "e.g. Grade 9, Class 11, B.Tech 2nd year" },
+  { key: "curriculum", label: "Curriculum / Board", type: "select", options: ["CBSE", "ICSE", "State Board", "IB", "IGCSE", "University", "Other"] },
+  { key: "stream", label: "Stream", type: "select", options: ["Science", "Commerce", "Arts", "Engineering", "Other"] },
+  { key: "school", label: "School / College", type: "text", placeholder: "e.g. Delhi Public School" },
+  { key: "performance", label: "Academic Performance", type: "select", options: ["Below 60%", "60%–74%", "75%–89%", "90% and above"] },
+  { key: "financialSituation", label: "Financial Situation", type: "select", options: ["0-25%", "25-50%", "50-75%", "75-100%"] },
+  {
+    key: "personality", label: "Personality Type", type: "select", options: [
+      "Realistic: Engineer, Electrician, Mechanic",
+      "Investigative: Scientist, Data Analyst, AI Researcher",
+      "Artistic: Designer, Writer, Animator",
+      "Social: Teacher, Counselor, Nurse",
+      "Enterprising: Entrepreneur, Manager, Marketing Executive",
+      "Conventional: Accountant, Banker, Administrator"
+    ]
+  },
+  { key: "country", label: "Country", type: "text", placeholder: "e.g. India" },
+  { key: "state", label: "State", type: "text", placeholder: "e.g. Telangana" },
+  { key: "city", label: "City", type: "text", placeholder: "e.g. Hyderabad" },
 ];
 
 // ── Auth hook ─────────────────────────────────────────────
@@ -49,24 +58,32 @@ export function logout() {
   clearSession();
 }
 
-// ── Main AuthFlow component ───────────────────────────────
+
 export default function AuthFlow({ onAuthenticated }) {
-  const [mode, setMode]       = useState("login"); // "login" | "signup" | "profile"
-  const [email, setEmail]     = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [emailError, setEmailError] = useState("");
-  const [profileData, setProfileData] = useState({});
-  const [profileErrors, setProfileErrors] = useState({});
-  const [step, setStep]       = useState(0); // profile creation step
+  const [showPassword, setShowPassword] = useState(false);
 
   // ── Login ──
   async function handleLogin() {
     const e = email.trim().toLowerCase();
     if (!e || !e.includes("@")) { setEmailError("Enter a valid email address"); return; }
+    if (!password.trim()) { setEmailError("Password is required"); return; }
     setEmailError("");
     try {
-      const res = await fetch(`${API}/api/profile/${encodeURIComponent(e)}`);
-      if (res.status === 404) {
-        setEmailError("No account found. Sign up first.");
+      const res = await fetch(`${API}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: e, password }),
+      });
+      if (res.status === 401) {
+        setEmailError("Invalid email or password");
+        return;
+      }
+      if (res.status === 403) {
+        const errorData = await res.json().catch(() => ({}));
+        setEmailError(errorData.detail || "Access forbidden.");
         return;
       }
       if (!res.ok) throw new Error("Server error during login");
@@ -80,189 +97,22 @@ export default function AuthFlow({ onAuthenticated }) {
     }
   }
 
-  // ── Signup: check email ──
-  async function handleSignup() {
-    const e = email.trim().toLowerCase();
-    if (!e || !e.includes("@")) { setEmailError("Enter a valid email address"); return; }
-    setEmailError("");
-    try {
-      const res = await fetch(`${API}/api/profile/${encodeURIComponent(e)}`);
-      if (res.ok) {
-        setEmailError("Account already exists. Log in instead.");
-        return;
-      }
-      if (res.status === 404) {
-        setEmailError("");
-        setMode("profile");
-      } else {
-        throw new Error("Server error during signup check");
-      }
-    } catch (err) {
-      setEmailError("Unable to connect to the server. Please try again.");
-      console.error(err);
-    }
-  }
-
-  // ── Profile field change ──
-  function handleField(key, value) {
-    setProfileData(prev => ({ ...prev, [key]: value }));
-    if (profileErrors[key]) setProfileErrors(prev => ({ ...prev, [key]: "" }));
-  }
-
-  // ── Profile steps ──
-  const STEPS = [
-    { title: "Academic details",  fields: ["name","grade","curriculum","stream","school"] },
-    { title: "About you",         fields: ["performance","financialSituation","personality"] },
-    { title: "Your location",     fields: ["country","state","city"] },
-  ];
-
-  async function handleNextStep() {
-    const currentFields = STEPS[step].fields;
-    const errors = {};
-    currentFields.forEach(key => {
-      const val = profileData[key];
-      if (!val || (typeof val === "string" && !val.trim())) {
-        errors[key] = "This field is required";
-      }
-    });
-    if (Object.keys(errors).length) { setProfileErrors(errors); return; }
-    if (step < STEPS.length - 1) { setStep(s => s + 1); return; }
-    
-    // Final save to backend MongoDB
-    const e = email.trim().toLowerCase();
-    const payload = {
-      ...profileData,
-      email: e
-    };
-    
-    try {
-      const res = await fetch(`${API}/api/profile`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Failed to save profile on server");
-      }
-      const savedProfile = await res.json();
-      saveSession(e);
-      saveLocalProfile(e, savedProfile);
-      onAuthenticated(e, savedProfile);
-    } catch (err) {
-      alert(`Error saving profile: ${err.message}`);
-      console.error(err);
-    }
-  }
-
-  // ── Render ──
-  const isLogin = mode === "login";
-
-  if (mode === "profile") {
-    const currentStep = STEPS[step];
-    const currentFields = currentStep.fields.map(k => PROFILE_FIELDS.find(f => f.key === k));
-
-    return (
-      <div className="auth-root">
-        <div className="auth-panel profile-panel">
-          <div className="auth-brand">
-            <div className="auth-logo">N</div>
-            <span className="auth-logo-name">Naaviverse</span>
-          </div>
-
-          <div className="profile-progress">
-            {STEPS.map((s, i) => (
-              <div key={i} className={`progress-step ${i <= step ? "progress-step--done" : ""} ${i === step ? "progress-step--active" : ""}`}>
-                <div className="progress-dot">{i < step ? "✓" : i + 1}</div>
-                <span>{s.title}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="auth-card">
-            <div className="auth-card-head">
-              <h2 className="auth-title">{currentStep.title}</h2>
-              <p className="auth-sub">Step {step + 1} of {STEPS.length}</p>
-            </div>
-
-            <div className="profile-fields">
-              {currentFields.map(field => (
-                <div key={field.key} className="auth-field-group">
-                  <label className="auth-field-label">{field.label}</label>
-                  {field.type === "select" ? (
-                    <select
-                      className={`auth-input ${profileErrors[field.key] ? "auth-input--error" : ""}`}
-                      value={profileData[field.key] || ""}
-                      onChange={e => handleField(field.key, e.target.value)}
-                    >
-                      <option value="">Select {field.label}</option>
-                      {field.options.map(opt => (
-                        <option key={opt} value={opt}>{opt}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      className={`auth-input ${profileErrors[field.key] ? "auth-input--error" : ""}`}
-                      placeholder={field.placeholder}
-                      value={profileData[field.key] || ""}
-                      onChange={e => handleField(field.key, e.target.value)}
-                    />
-                  )}
-                  {profileErrors[field.key] && (
-                    <span className="auth-field-error">{profileErrors[field.key]}</span>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="profile-actions">
-              {step > 0 && (
-                <button className="auth-btn-ghost" onClick={() => setStep(s => s - 1)}>
-                  ← Back
-                </button>
-              )}
-              <button className="auth-btn-primary" onClick={handleNextStep}>
-                {step < STEPS.length - 1 ? "Next →" : "Complete Profile →"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="auth-visual">
-          <div className="auth-visual-inner">
-            <div className="auth-visual-badge">Profile Setup</div>
-            <h1 className="auth-visual-title">Build your<br /><em>journey map</em></h1>
-            <p className="auth-visual-desc">Your profile helps us generate a path that fits exactly where you are and where you want to go.</p>
-            <div className="auth-visual-dots">
-              {STEPS.map((_, i) => (
-                <div key={i} className={`visual-dot ${i <= step ? "visual-dot--active" : ""}`} />
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <AuthStyles />
-      </div>
-    );
-  }
-
   return (
     <div className="auth-root">
       <div className="auth-panel">
         <div className="auth-brand">
-          <div className="auth-logo">N</div>
-          <span className="auth-logo-name">Naaviverse</span>
+          <img src="/naavi_logo.png" alt="Naavi logo" className="auth-logo-img" />
+          {/* <span className="auth-logo-name">
+            <span style={{ color: "var(--accent)", fontWeight: "700" }}>AI-Powered</span> Path Engine
+          </span> */}
         </div>
 
         <div className="auth-card">
           <div className="auth-card-head">
-            <h2 className="auth-title">{isLogin ? "Welcome back" : "Create account"}</h2>
-            <p className="auth-sub">
-              {isLogin
-                ? "Log in to load your saved profile and continue your journey."
-                : "Sign up with your email to create your profile and get started."}
-            </p>
+            <h2 className="auth-title">Path Engine Admin Login</h2>
+            {/* <p className="auth-sub">
+              Log in with your administrator credentials to curate career pathways and manage student signals.
+            </p> */}
           </div>
 
           <div className="auth-field-group">
@@ -270,49 +120,48 @@ export default function AuthFlow({ onAuthenticated }) {
             <input
               type="email"
               className={`auth-input ${emailError ? "auth-input--error" : ""}`}
-              placeholder="you@example.com"
+              placeholder="admin@gmail.com"
               value={email}
               onChange={e => { setEmail(e.target.value); setEmailError(""); }}
-              onKeyDown={e => e.key === "Enter" && (isLogin ? handleLogin() : handleSignup())}
+              onKeyDown={e => e.key === "Enter" && handleLogin()}
               autoFocus
             />
+          </div>
+
+          <div className="auth-field-group">
+            <label className="auth-field-label">Password</label>
+            <div className="password-input-wrapper">
+              <input
+                type={showPassword ? "text" : "password"}
+                className={`auth-input ${emailError ? "auth-input--error" : ""}`}
+                placeholder="••••••••"
+                value={password}
+                onChange={e => { setPassword(e.target.value); setEmailError(""); }}
+                onKeyDown={e => e.key === "Enter" && handleLogin()}
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword(prev => !prev)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
             {emailError && <span className="auth-field-error">{emailError}</span>}
           </div>
 
           <button
             className="auth-btn-primary"
-            onClick={isLogin ? handleLogin : handleSignup}
-            disabled={!email.trim()}
+            onClick={handleLogin}
+            disabled={!email.trim() || !password.trim()}
           >
-            {isLogin ? "Log In →" : "Continue →"}
-          </button>
-
-          <div className="auth-divider"><span>or</span></div>
-
-          <button className="auth-btn-ghost" onClick={() => { setMode(isLogin ? "signup" : "login"); setEmailError(""); }}>
-            {isLogin ? "New here? Create account" : "Already have an account? Log in"}
+            Log In →
           </button>
         </div>
-
-        {/* <p className="auth-footnote">
-          No password needed — your data stays in this browser only.
-        </p> */}
       </div>
 
       <div className="auth-visual">
-        <div className="auth-visual-inner">
-          <div className="auth-visual-badge">AI Path Engine</div>
-          <h1 className="auth-visual-title">Map your<br /><em>career route</em></h1>
-          <p className="auth-visual-desc">Enter your current situation, set your goal, and get a step-by-step path built just for you.</p>
-          <div className="auth-features">
-            {["Personalised career roadmap","Macro, micro & nano guidance","Mentors and learning resources"].map((f, i) => (
-              <div key={i} className="auth-feature-item">
-                <span className="auth-feature-dot" />
-                <span>{f}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <img src="/pure_education_roadmap.png" alt="AI Career Pathways" className="auth-visual-image" />
       </div>
 
       <AuthStyles />
@@ -338,29 +187,23 @@ function AuthStyles() {
         gap: 28px;
         animation: fadeUp 0.4s ease both;
       }
-      .profile-panel {
-        justify-content: flex-start;
-        padding-top: 40px;
-        overflow-y: auto;
-        max-height: 100vh;
-      }
       .auth-brand {
         display: flex;
         align-items: center;
         gap: 10px;
         margin-bottom: 8px;
       }
-      .auth-logo {
-        width: 36px; height: 36px; border-radius: 10px;
-       background: linear-gradient(135deg, var(--green), var(--blue));
-        color: #fff; font-weight: 700; font-size: 17px;
-        display: flex; align-items: center; justify-content: center;
-        font-family: var(--font-display);
+      .auth-logo-img {
+        width: 250px;
+        height: 60px;
+        object-fit: contain;
       }
       .auth-logo-name {
         font-family: var(--font-display);
-        font-size: 20px;
+        font-size: 18px;
+        font-weight: 600;
         color: var(--text);
+        letter-spacing: -0.01em;
       }
       .auth-card {
         background: #fff;
@@ -375,7 +218,8 @@ function AuthStyles() {
       .auth-card-head { display: flex; flex-direction: column; gap: 6px; }
       .auth-title {
         font-family: var(--font-display);
-        font-size: 28px;
+        font-size: 20px;
+        font-weight: 600;
         color: var(--text);
         line-height: 1.2;
       }
@@ -397,6 +241,29 @@ function AuthStyles() {
       .auth-input--error { border-color: #F07A5A; }
       .auth-field-error { font-size: 12px; color: #C05A3A; }
 
+      .password-input-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+      .password-input-wrapper .auth-input {
+        padding-right: 50px;
+      }
+      .password-toggle-btn {
+        position: absolute;
+        right: 12px;
+        background: none;
+        border: none;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        outline: none;
+      }
+      .password-toggle-btn:hover {
+        color: var(--accent2);
+      }
+
       .auth-btn-primary {
         width: 100%; padding: 14px;
         background: var(--accent); color: #fff;
@@ -410,71 +277,11 @@ function AuthStyles() {
       }
       .auth-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-      .auth-btn-ghost {
-        width: 100%; padding: 12px;
-        background: none; color: var(--text2);
-        border: 1.5px solid var(--border); border-radius: 10px;
-        font-family: var(--font-body); font-size: 14px;
-        cursor: pointer; transition: all 0.2s;
-      }
-      .auth-btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
-
-      .auth-divider {
-        display: flex; align-items: center; gap: 12px;
-        color: var(--text3); font-size: 12px;
-      }
-      .auth-divider::before, .auth-divider::after {
-        content: ""; flex: 1; height: 1px; background: var(--border);
-      }
-
-      .auth-footnote { font-size: 12px; color: var(--text3); text-align: center; }
-
-      /* Profile steps progress */
-      .profile-progress {
-        display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap;
-      }
-      .progress-step {
-        display: flex; align-items: center; gap: 8px;
-        font-size: 12px; color: var(--text3); font-weight: 500;
-        padding: 6px 12px; border-radius: 20px;
-        border: 1.5px solid var(--border); background: #fff;
-        transition: all 0.2s;
-      }
-      .progress-step--active {
-        border-color: var(--accent); color: var(--accent2);
-        background: var(--accent-soft);
-      }
-      .progress-step--done {
-        border-color: var(--accent); color: var(--accent2);
-        background: var(--accent-soft);
-      }
-      .progress-dot {
-        width: 20px; height: 20px; border-radius: 50%;
-        background: var(--border); color: var(--text3);
-        font-size: 10px; font-weight: 700;
-        display: flex; align-items: center; justify-content: center;
-      }
-      .progress-step--active .progress-dot,
-      .progress-step--done .progress-dot {
-        background: var(--accent); color: #fff;
-      }
-
-      .profile-fields { display: flex; flex-direction: column; gap: 16px; }
-
-      .profile-actions {
-        display: flex; gap: 12px; margin-top: 4px;
-      }
-      .profile-actions .auth-btn-primary { flex: 1; }
-      .profile-actions .auth-btn-ghost   { flex: 0 0 auto; width: auto; padding: 12px 20px; }
-
       /* Right visual panel */
       .auth-visual {
-        background: linear-gradient(135deg, rgba(52,168,83,0.1) 0%, rgba(66,133,244,0.08) 50%, rgba(232,49,42,0.06) 100%), #F8F9FA;
-          linear-gradient(90deg, rgba(214,242,236,0.6) 0 1px, transparent 1px 48px),
-          linear-gradient(0deg, rgba(214,242,236,0.6) 0 1px, transparent 1px 48px),
-          #F0F7F4;
+        background: #F8F9FA;
         display: flex; align-items: center; justify-content: center;
-        padding: 60px 56px;
+        padding: 0;
         position: relative; overflow: hidden;
       }
       .auth-visual::before {
@@ -489,46 +296,18 @@ function AuthStyles() {
         width: 240px; height: 240px; border-radius: 50%;
         background: radial-gradient(circle, rgba(90,155,232,0.14), transparent 70%);
       }
-      .auth-visual-inner {
-        position: relative; z-index: 1;
-        display: flex; flex-direction: column; gap: 20px;
+      .auth-visual-image {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: 2;
+        animation: fadeUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
-      .auth-visual-badge {
-        display: inline-flex; align-self: flex-start;
-        padding: 5px 14px; border-radius: 20px;
-        background: var(--accent-soft); color: var(--accent2);
-        font-size: 12px; font-weight: 600;
-      }
-      .auth-visual-title {
-        font-family: var(--font-display);
-        font-size: clamp(36px, 4vw, 52px);
-        line-height: 1.15; color: var(--text);
-      }
-      .auth-visual-title em { font-style: italic; color: var(--accent); }
-      .auth-visual-desc { font-size: 16px; color: var(--text2); line-height: 1.7; max-width: 380px; }
-
-      .auth-features { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
-      .auth-feature-item {
-        display: flex; align-items: center; gap: 10px;
-        font-size: 14px; color: var(--text2);
-      }
-      .auth-feature-dot {
-        width: 8px; height: 8px; border-radius: 50%;
-        background: var(--accent); flex-shrink: 0;
-      }
-
-      .auth-visual-dots { display: flex; gap: 8px; margin-top: 8px; }
-      .visual-dot {
-        width: 10px; height: 10px; border-radius: 50%;
-        background: var(--border); transition: all 0.3s;
-      }
-      .visual-dot--active { background: var(--accent); transform: scale(1.2); }
 
       @media (max-width: 860px) {
         .auth-root { grid-template-columns: 1fr; }
         .auth-visual { display: none; }
         .auth-panel { padding: 40px 24px; }
-        .profile-panel { max-height: none; }
       }
     `}</style>
   );

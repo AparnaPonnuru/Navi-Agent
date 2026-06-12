@@ -121,20 +121,182 @@ function analyzeGoalParts(goalText) {
   return { program, university, country, missing };
 }
 
+function analyzeRefinement(text) {
+  if (!text || !text.trim()) {
+    return {
+      isValid: false,
+      message: "Please describe the changes you want to make to this pathway."
+    };
+  }
+
+  const val = text.toLowerCase().trim();
+
+  // Noise / irrelevant keywords/prompts check
+  const noiseKeywords = [
+    "tell me a story", "tell a story", "write a story", "write a poem", "write a song",
+    "tell me a joke", "tell a joke", "joke", "weather", "capital of", "who is",
+    "what is the meaning of life", "hi", "hello", "hey", "how are you", "what's up",
+    "sing a song", "write code", "help me chat", "how are you doing"
+  ];
+
+  if (noiseKeywords.some(noise => val.includes(noise)) || val.length < 4) {
+    return {
+      isValid: false,
+      message: "Information is not accurate or irrelevant. Please provide path-related refinement instructions."
+    };
+  }
+
+  // Keywords that must be present to count as relevant refinement
+  const validKeywords = [
+    "step", "milestone", "path", "road", "course", "market", "description", "objective",
+    "duration", "add", "change", "remove", "delete", "update", "make", "give", "focus",
+    "study", "prep", "sat", "ielts", "act", "toefl", "exam", "career", "university",
+    "college", "school", "curriculum", "grade", "subject", "class", "detail", "more",
+    "resource", "mentor", "timeline", "month", "year", "academics", "score", "placement",
+    "portfolio", "admission", "ielts", "gpa", "internship", "project"
+  ];
+
+  const hasValidKeyword = validKeywords.some(kw => val.includes(kw));
+
+  if (!hasValidKeyword) {
+    return {
+      isValid: false,
+      message: "Information is not accurate or irrelevant. E.g. try: 'change step 1 description' or 'add more steps'."
+    };
+  }
+
+  return {
+    isValid: true,
+    message: "Instruction looks good! Click Refine Pathway to apply changes."
+  };
+}
+
+function RotateCwIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 4v6h-6" />
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+    </svg>
+  );
+}
+
 export default function Dashboard({ profile, pathData, userInput, initialCurrent = "", onPathGenerated, onStepClick, onGenerationStart, onProfileUpdated }) {
-  const [current, setCurrent] = useState(initialCurrent);
-  const [goal, setGoal] = useState("");
+  const [current, setCurrent] = useState(userInput?.current || initialCurrent);
+  const [goal, setGoal] = useState(userInput?.goal || "");
   const [loading, setLoading] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState(null);
   const [refinePrompt, setRefinePrompt] = useState("");
+  const [savingPath, setSavingPath] = useState(false);
+  const [selectedAltIdx, setSelectedAltIdx] = useState(0);
+  const [regeneratingIdx, setRegeneratingIdx] = useState(null);
+
+  const activePath = pathData?.alternatives ? pathData.alternatives[selectedAltIdx] : pathData;
+  const steps = activePath?.macro_path || [];
+
+  const handleSavePath = async () => {
+    if (!activePath) {
+      console.warn("[Naavi Dashboard] Save Path called but no active path exists.");
+      return;
+    }
+    console.log("[Naavi Dashboard] Saving path to review. ActivePath details:", {
+      title: activePath.path_title,
+      duration: activePath.total_duration,
+      readiness: activePath.readiness_score,
+      stepsCount: activePath.macro_path?.length
+    });
+    setSavingPath(true);
+    try {
+      const res = await fetch(`${API}/api/paths/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          current_position: userInput.current,
+          target_goal: userInput.goal,
+          profile: profile,
+          roadmap_data: activePath
+        })
+      });
+      if (!res.ok) throw new Error("Failed to save path");
+      const data = await res.json();
+      console.log("[Naavi Dashboard] Save Path API success response:", data);
+      
+      // Update the pathData with the new db_id and status
+      const updatedActivePath = {
+        ...activePath,
+        db_id: data.db_id,
+        status: "under_admin_review"
+      };
+
+      let mergedData;
+      if (pathData?.alternatives) {
+        const newAlternatives = [...pathData.alternatives];
+        newAlternatives[selectedAltIdx] = updatedActivePath;
+        mergedData = {
+          ...pathData,
+          alternatives: newAlternatives
+        };
+      } else {
+        mergedData = updatedActivePath;
+      }
+      
+      console.log("[Naavi Dashboard] Updating path state with saved database reference.");
+      onPathGenerated(mergedData, userInput);
+    } catch (err) {
+      console.error("[Naavi Dashboard] Save Path error:", err);
+      alert(err.message || "Failed to save pathway");
+    } finally {
+      setSavingPath(false);
+    }
+  };
+
+  const handleDeletePath = () => {
+    console.log("[Naavi Dashboard] Delete Path triggered. Target path option:", activePath?.option_name, "Index:", selectedAltIdx);
+    const confirmDelete = window.confirm(`Are you sure you want to delete the "${activePath?.option_name || 'this'}" pathway option?`);
+    if (!confirmDelete) {
+      console.log("[Naavi Dashboard] Delete canceled by user.");
+      return;
+    }
+
+    if (pathData?.alternatives) {
+      const remainingAlts = pathData.alternatives.filter((_, idx) => idx !== selectedAltIdx);
+      console.log(`[Naavi Dashboard] Alternatives deleted. Remaining alternative options:`, remainingAlts.map(a => a.option_name));
+      if (remainingAlts.length > 0) {
+        setSelectedAltIdx(0);
+        setActiveStep(null);
+        onPathGenerated({
+          ...pathData,
+          alternatives: remainingAlts
+        }, userInput);
+      } else {
+        console.log("[Naavi Dashboard] No remaining alternatives. Clearing path completely.");
+        onPathGenerated(null, null);
+      }
+    } else {
+      console.log("[Naavi Dashboard] No alternatives wrapper. Clearing path completely.");
+      onPathGenerated(null, null);
+    }
+  };
 
   useEffect(() => {
-    setCurrent(initialCurrent);
-  }, [initialCurrent]);
+    if (userInput?.current) {
+      setCurrent(userInput.current);
+    } else {
+      setCurrent(initialCurrent);
+    }
+  }, [userInput?.current, initialCurrent]);
+
+  useEffect(() => {
+    if (userInput?.goal) {
+      setGoal(userInput.goal);
+    } else {
+      setGoal("");
+    }
+  }, [userInput?.goal]);
 
   const goalAnalysis = analyzeGoalParts(goal);
+  const refineAnalysis = analyzeRefinement(refinePrompt);
   const isGoalValid = goal.trim() !== "" && goalAnalysis.missing.length === 0;
   const missingFieldsText = goalAnalysis.missing.join(", ").replace(/, ([^,]*)$/, ' and $1');
 
@@ -149,27 +311,32 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   });
 
   function applyStatusEvent(data) {
+    console.log("[Naavi Dashboard] Status Event - Msg:", data.message, "Progress:", data.progress, "Statuses:", data.statuses);
     if (data.statuses) setWorkflowStatus(data.statuses);
     if (typeof data.progress === "number") setLoaderProgress(data.progress);
     if (data.message) setLoadMsg(data.message);
   }
 
   function handleStreamEvent(eventType, eventData, resultRef) {
+    console.log(`[Naavi Dashboard] Stream Event - Type: "${eventType}"`);
     if (eventType === "status") {
       applyStatusEvent(eventData);
       return;
     }
     if (eventType === "result") {
+      console.log("[Naavi Dashboard] Stream Event Result Payload received:", eventData);
       resultRef.current = eventData;
       return;
     }
     if (eventType === "error") {
+      console.error("[Naavi Dashboard] Stream Event error received:", eventData);
       throw new Error(eventData.message || "Path generation failed");
     }
   }
 
   async function readPathStream(response) {
     if (!response.body) throw new Error("Backend did not return a progress stream");
+    console.log("[Naavi Dashboard] Reading event-stream response stream...");
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -178,7 +345,10 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
 
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log("[Naavi Dashboard] Event stream reader complete.");
+        break;
+      }
 
       buffer += decoder.decode(value, { stream: true });
       const events = buffer.split("\n\n");
@@ -205,19 +375,40 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
       }
     }
 
-    if (!resultRef.current) throw new Error("Path generation finished without returning a roadmap");
+    if (!resultRef.current) {
+      console.error("[Naavi Dashboard] Stream ended, but no result payload was extracted from stream.");
+      throw new Error("Path generation finished without returning a roadmap");
+    }
     return resultRef.current;
   }
 
-  async function generate(customPrompt = "") {
+  async function generate(customPrompt = "", isTabRegen = false) {
     const promptText = typeof customPrompt === "string" ? customPrompt : "";
-    if (!current.trim() || !isGoalValid) return;
+    if (!current.trim() || !isGoalValid) {
+      console.warn("[Naavi Dashboard] Cannot generate pathway. Inputs invalid or empty:", { current, goal, isGoalValid });
+      return;
+    }
+    
+    const isRegen = isTabRegen && pathData !== null && pathData !== undefined;
+    console.log("[Naavi Dashboard] generate() invoked:", {
+      current,
+      goal,
+      isRegen,
+      isTabRegen,
+      refinePrompt: promptText || "(none)"
+    });
+    
     if (onGenerationStart) {
-      onGenerationStart({ current, goal });
+      onGenerationStart({ current, goal }, isRegen);
     }
     setLoading(true);
     setError("");
 
+    if (isRegen) {
+      setRegeneratingIdx(selectedAltIdx);
+    } else {
+      setRegeneratingIdx(null);
+    }
 
     applyStatusEvent({
       statuses: {
@@ -232,38 +423,67 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
     });
 
     try {
+      const payload = {
+        current_position: current,
+        target_goal: goal,
+        profile: profile,
+        refine_prompt: promptText || null,
+        existing_roadmap: isRegen && promptText ? activePath : null,
+        focus: isRegen && activePath ? activePath.option_name : null
+      };
+      console.log("[Naavi Dashboard] Calling Stream API endpoint:", `${API}/api/path/stream`, "Payload:", payload);
+      
       const streamRes = await fetch(`${API}/api/path/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          current_position: current,
-          target_goal: goal,
-          profile: profile,
-          refine_prompt: promptText || null,
-          existing_roadmap: promptText ? pathData : null
-        }),
+        body: JSON.stringify(payload),
       });
       if (!streamRes.ok) {
         const errorData = await streamRes.json().catch(() => ({}));
+        console.error("[Naavi Dashboard] Stream API responded with error:", errorData);
         throw new Error(errorData.detail || "Path generation failed");
       }
 
       const finalData = await readPathStream(streamRes);
+      console.log("[Naavi Dashboard] Successfully parsed final roadmap data from stream:", finalData);
       setLoading(false);
-      onPathGenerated(finalData, { current, goal });
+      setRegeneratingIdx(null);
+
+      let mergedData = finalData;
+      if (finalData.alternatives && finalData.alternatives.length === 1) {
+        if (pathData?.alternatives) {
+          console.log("[Naavi Dashboard] Merging single alternative replacement back into alternatives array at index:", selectedAltIdx);
+          const newAlternatives = [...pathData.alternatives];
+          newAlternatives[selectedAltIdx] = {
+            ...finalData.alternatives[0],
+            option_name: activePath?.option_name || finalData.alternatives[0].option_name
+          };
+          mergedData = {
+            ...pathData,
+            alternatives: newAlternatives
+          };
+        } else {
+          mergedData = finalData.alternatives[0];
+        }
+      } else {
+        console.log("[Naavi Dashboard] Full set of alternatives generated. Resetting selected index to 0.");
+        setSelectedAltIdx(0);
+      }
+
+      onPathGenerated(mergedData, { current, goal });
       if (promptText) {
         setRefinePrompt("");
       }
 
     } catch (e) {
+      console.error("[Naavi Dashboard] Generation Exception:", e);
       setLoading(false);
+      setRegeneratingIdx(null);
       setError(e.message.includes("fetch")
         ? "Cannot connect to backend. Run: uvicorn main:app --reload --port 8000"
         : e.message);
     }
   }
-
-  const steps = pathData?.macro_path || [];
 
   return (
     <div className="db-root">
@@ -312,7 +532,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
               onKeyDown={e => e.key === "Enter" && e.ctrlKey && isGoalValid && generate()}
             />
 
-            {/* Naavi Agent Goal Validation Widget */}
+            {/* Naavi Goal Validation Widget */}
             <div className={`db-agent-validation ${isGoalValid ? 'valid' : goal.trim() ? 'invalid' : 'empty'}`}>
               <div className="db-agent-avatar">
                 <div className="db-agent-pulse-ring" />
@@ -353,7 +573,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
 
             <button
               className="db-generate-btn"
-              onClick={generate}
+              onClick={() => generate("", false)}
               disabled={loading || !current.trim() || !isGoalValid}
             >
               {loading ? (
@@ -368,7 +588,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
           </div>
 
           {/* Refine with AI Agent Card */}
-          {pathData && !loading && (
+          {pathData && (
             <div className="db-refine-card card">
               <div className="db-refine-head">
                 <div className="db-refine-head-left">
@@ -390,10 +610,28 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                 onChange={e => setRefinePrompt(e.target.value)}
                 disabled={loading}
               />
+              {refinePrompt.trim() !== "" && (
+                <div className={`db-agent-validation ${refineAnalysis.isValid ? 'valid' : 'invalid'}`} style={{ marginTop: 12, marginBottom: 4 }}>
+                  <div className="db-agent-avatar">
+                    <div className="db-agent-pulse-ring" />
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a3 3 0 0 0-3 3v2a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                      <rect x="4" y="8" width="16" height="12" rx="2" />
+                      <path d="M9 17h6" />
+                    </svg>
+                  </div>
+                  <div className="db-agent-body">
+                    <span className="db-agent-title">Naavi Agent</span>
+                    <p className="db-agent-text">
+                      {refineAnalysis.message}
+                    </p>
+                  </div>
+                </div>
+              )}
               <button
                 className="db-refine-btn"
-                onClick={() => generate(refinePrompt)}
-                disabled={loading || !refinePrompt.trim()}
+                onClick={() => generate(refinePrompt, true)}
+                disabled={loading || !refineAnalysis.isValid}
               >
                 <IconNavigation size={14} /> Refine Pathway
               </button>
@@ -407,7 +645,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
 
       {/* ── RIGHT PANEL ── */}
       <div className="db-right">
-        {!pathData && !loading && (
+        {!pathData && !loading ? (
           <div className="db-empty-state">
             <img
               src="/career_route.png"
@@ -417,59 +655,24 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
             <h3 className="db-empty-title">Your path will appear here</h3>
             <p className="db-empty-sub">Enter your current situation and future goal on the left, then click Find My Path</p>
           </div>
-        )}
-
-        {loading && (
-          <div className="db-loading-state">
-            <div className="loader-container">
-              <div className="loader-header">
-                <div className="loader-radar-wrapper">
-                  <div className="loader-radar" />
-                  <span className="loader-brain-icon"><IconBrain size={28} /></span>
-                </div>
-                <h3>Generating Your Career Path</h3>
-                <p>{loadMsg}</p>
-              </div>
-
-              {/* Progress bar */}
-              <div className="loader-progress-bar-wrapper">
-                <div className="loader-progress-bar" style={{ width: `${loaderProgress}%` }} />
-                <span className="loader-progress-text">{loaderProgress}%</span>
-              </div>
-
-              {/* Agent workflow */}
-              <div className="loader-pipeline">
-                {WORKFLOW_STEPS.map((step, index) => {
-                  const status = workflowStatus[step.key];
-                  return (
-                    <div key={step.key} className={`loader-pipeline-step ${status}`}>
-                      <div className="step-indicator">
-                        {status === "completed" ? <IconCheck size={14} /> : status === "active" ? <div className="spinner-inner" /> : index + 1}
-                      </div>
-                      <div className="step-content">
-                        <span className="step-title">{step.title}</span>
-                        <span className="step-desc">{step.message}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {loaderProgress === 100 && (
-                <div className="loader-success">
-                  <div className="loader-success-icon"><IconCheck size={18} /></div>
-                  <div>
-                    <strong>Path Generated Successfully</strong>
-                    <span>Your personalized roadmap is ready to explore.</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {pathData && !loading && (
+        ) : (
           <div className="db-path-view">
+            {/* Alternatives selector tabs */}
+            <div className="db-alt-tabs">
+              {(pathData?.alternatives || ["Academic & Research", "Practical & Industry", "Holistic & Career-Prep"]).map((alt, idx) => {
+                const name = typeof alt === "string" ? alt : (alt.option_name || `Option ${idx + 1}`);
+                return (
+                  <button
+                    key={idx}
+                    className={`db-alt-tab-btn ${selectedAltIdx === idx ? 'active' : ''}`}
+                    onClick={() => { setSelectedAltIdx(idx); setActiveStep(null); }}
+                  >
+                    <span className="tab-indicator" />
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
 
             {/* Route header */}
             <div className="db-route-header">
@@ -479,7 +682,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                     <span className="db-rt-dot green" />
                     <div>
                       <div className="db-rt-label">From</div>
-                      <div className="db-rt-val">{userInput.current}</div>
+                      <div className="db-rt-val">{userInput?.current || current}</div>
                     </div>
                   </div>
                   <div className="db-rt-vline" />
@@ -487,100 +690,189 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                     <span className="db-rt-dot red" />
                     <div>
                       <div className="db-rt-label">To</div>
-                      <div className="db-rt-val">{userInput.goal}</div>
+                      <div className="db-rt-val">{userInput?.goal || goal}</div>
                     </div>
                   </div>
                 </div>
               </div>
               <div className="db-route-header-right">
                 <div className="db-route-stat">
-                  <span className="db-route-stat-val green-text">{pathData.readiness_score}</span>
+                  <span className="db-route-stat-val green-text">{activePath?.readiness_score || "--"}</span>
                   <span className="db-route-stat-lbl">Readiness</span>
                 </div>
                 <div className="db-route-stat">
-                  <span className="db-route-stat-val">{pathData.total_duration}</span>
+                  <span className="db-route-stat-val">{activePath?.total_duration || "--"}</span>
                   <span className="db-route-stat-lbl">Duration</span>
                 </div>
                 <div className="db-route-stat">
-                  <span className="db-route-stat-val">{steps.length}</span>
+                  <span className="db-route-stat-val">{steps?.length || 0}</span>
                   <span className="db-route-stat-lbl">Steps</span>
                 </div>
               </div>
             </div>
 
-            {/* Pathway Overall Name & Description Card */}
-            {(pathData.path_title || pathData.path_description) && (
-              <div className="db-path-intro-card">
-                <div className="db-path-intro-header">
-                  <span className="db-path-intro-icon-wrapper">
-                    <IconRoute size={20} />
-                  </span>
-                  <h2 className="db-path-title">{pathData.path_title || `Pathway to ${userInput.goal}`}</h2>
-                </div>
-                {pathData.path_description && (
-                  <p className="db-path-desc">{pathData.path_description}</p>
-                )}
-              </div>
-            )}
-
-            {/* Readiness bar */}
-            <div className="db-readiness-bar-row">
-              <span className="db-readiness-label">{pathData.readiness_label}</span>
-              <div className="db-readiness-track">
-                <div className="db-readiness-fill" style={{ width: `${pathData.readiness_score}%` }} />
-              </div>
-              <span className="db-readiness-score">{pathData.readiness_score}/100</span>
-            </div>
-
-            {/* Steps — Google Maps direction style */}
-            <div className="db-steps-label">
-              {steps.length} steps · click any step to explore
-            </div>
-
-            <div className="db-steps-list">
-              {steps.map((step, i) => {
-                const c = STEP_COLORS[i % STEP_COLORS.length];
-                const isActive = activeStep?.id === step.id;
-                return (
-                  <div key={step.id} className="db-step-row">
-                    {/* Connector line */}
-                    <div className="db-step-spine">
-                      <div className="db-step-node" style={{ background: c.border, boxShadow: isActive ? `0 0 0 5px ${c.bg}` : "none" }}>
-                        {isActive ? <IconCheck size={13} /> : <span>{step.id}</span>}
-                      </div>
-                      {i < steps.length - 1 && (
-                        <div className="db-step-spine-line" style={{ borderColor: c.border + "40" }} />
-                      )}
+            {/* Content Space */}
+            {((loading && !pathData) || (loading && regeneratingIdx === selectedAltIdx)) ? (
+              <div className="db-loading-state" style={{ padding: 0, background: 'transparent', boxShadow: 'none', minHeight: 'auto', height: 'auto' }}>
+                <div className="loader-container">
+                  <div className="loader-header">
+                    <div className="loader-radar-wrapper">
+                      <div className="loader-radar" />
+                      <span className="loader-brain-icon"><IconBrain size={28} /></span>
                     </div>
+                    <h3>Generating Your Career Path</h3>
+                    <p>{loadMsg}</p>
+                  </div>
 
-                    {/* Step card */}
-                    <div
-                      className={`db-step-card ${isActive ? "db-step-card--active" : ""}`}
-                      style={isActive ? { borderColor: c.border, background: c.bg + "60" } : {}}
-                      onClick={() => setActiveStep(isActive ? null : step)}
-                    >
-                      <div className="db-step-card-top">
-                        <span className="db-step-title">{step.title}</span>
-                        <span className="db-step-dur" style={{ color: c.text, background: c.bg }}>{step.duration}</span>
-                      </div>
-                      <p className="db-step-desc">{step.description}</p>
+                  {/* Progress bar */}
+                  <div className="loader-progress-bar-wrapper">
+                    <div className="loader-progress-bar" style={{ width: `${loaderProgress}%` }} />
+                    <span className="loader-progress-text">{loaderProgress}%</span>
+                  </div>
 
-                      {isActive && (
-                        <div className="db-step-expanded">
-                          <div className="db-step-actions">
-                            <button className="db-step-explore-btn"
-                              style={{ background: c.border }}
-                              onClick={e => { e.stopPropagation(); onStepClick(step); }}>
-                              Explore step <IconArrowRight size={14} />
-                            </button>
+                  {/* Agent workflow */}
+                  <div className="loader-pipeline">
+                    {WORKFLOW_STEPS.map((step, index) => {
+                      const status = workflowStatus[step.key];
+                      return (
+                        <div key={step.key} className={`loader-pipeline-step ${status}`}>
+                          <div className="step-indicator">
+                            {status === "completed" ? <IconCheck size={14} /> : status === "active" ? <div className="spinner-inner" /> : index + 1}
+                          </div>
+                          <div className="step-content">
+                            <span className="step-title">{step.title}</span>
+                            <span className="step-desc">{step.message}</span>
                           </div>
                         </div>
+                      );
+                    })}
+                  </div>
+
+                  {loaderProgress === 100 && (
+                    <div className="loader-success">
+                      <div className="loader-success-icon"><IconCheck size={18} /></div>
+                      <div>
+                        <strong>Path Generated Successfully</strong>
+                        <span>Your personalized roadmap is ready to explore.</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              activePath && (
+                <>
+                  {/* Pathway Overall Name & Description Card */}
+                  {(activePath.path_title || activePath.path_description) && (
+                    <div className="db-path-intro-card">
+                      <div className="db-path-intro-header">
+                        <span className="db-path-intro-icon-wrapper">
+                          <IconRoute size={20} />
+                        </span>
+                        <h2 className="db-path-title">{activePath.path_title || `Pathway to ${userInput?.goal || goal}`}</h2>
+                      </div>
+                      {activePath.path_description && (
+                        <p className="db-path-desc">{activePath.path_description}</p>
                       )}
                     </div>
+                  )}
+
+                  {/* Readiness bar */}
+                  <div className="db-readiness-bar-row">
+                    <span className="db-readiness-label">{activePath.readiness_label}</span>
+                    <div className="db-readiness-track">
+                      <div className="db-readiness-fill" style={{ width: `${activePath.readiness_score}%` }} />
+                    </div>
+                    <span className="db-readiness-score">{activePath.readiness_score}/100</span>
                   </div>
-                );
-              })}
-            </div>
+
+                  {/* Steps — Google Maps direction style */}
+                  <div className="db-steps-label">
+                    {steps.length} steps · click any step to explore
+                  </div>
+
+                  <div className="db-steps-list">
+                    {steps.map((step, i) => {
+                      const c = STEP_COLORS[i % STEP_COLORS.length];
+                      const isActive = activeStep?.id === step.id;
+                      return (
+                        <div key={step.id} className="db-step-row">
+                          {/* Connector line */}
+                          <div className="db-step-spine">
+                            <div className="db-step-node" style={{ background: c.border, boxShadow: isActive ? `0 0 0 5px ${c.bg}` : "none" }}>
+                              {isActive ? <IconCheck size={13} /> : <span>{step.id}</span>}
+                            </div>
+                            {i < steps.length - 1 && (
+                              <div className="db-step-spine-line" style={{ borderColor: c.border + "40" }} />
+                            )}
+                          </div>
+
+                          {/* Step card */}
+                          <div
+                            className={`db-step-card ${isActive ? "db-step-card--active" : ""}`}
+                            style={isActive ? { borderColor: c.border, background: c.bg + "60" } : {}}
+                            onClick={() => setActiveStep(isActive ? null : step)}
+                          >
+                            <div className="db-step-card-top">
+                              <span className="db-step-title">{step.title}</span>
+                              <span className="db-step-dur" style={{ color: c.text, background: c.bg }}>{step.duration}</span>
+                            </div>
+                            <p className="db-step-desc">{step.description}</p>
+
+                            {isActive && (
+                              <div className="db-step-expanded">
+                                <div className="db-step-actions">
+                                  <button className="db-step-explore-btn"
+                                    style={{ background: c.border }}
+                                    onClick={e => { e.stopPropagation(); onStepClick(step); }}>
+                                    Explore step <IconArrowRight size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Save/Delete pathway button at the bottom right */}
+                  <div className="db-path-actions">
+                    {!activePath.db_id && (
+                      <button
+                        className="db-regenerate-btn"
+                        onClick={() => generate("", true)}
+                        disabled={loading}
+                      >
+                        <RotateCwIcon size={14} /> Regenerate
+                      </button>
+                    )}
+                    
+                    <button
+                      className="db-delete-path-btn"
+                      onClick={handleDeletePath}
+                      disabled={loading || savingPath}
+                    >
+                      Delete Pathway
+                    </button>
+
+                    {activePath.db_id ? (
+                      <button className="db-save-path-btn saved" disabled>
+                        <IconCheck size={14} /> Saved to Review
+                      </button>
+                    ) : (
+                      <button
+                        className="db-save-path-btn"
+                        onClick={handleSavePath}
+                        disabled={savingPath}
+                      >
+                        {savingPath ? "Saving..." : "Save Pathway"}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )
+            )}
           </div>
         )}
       </div>

@@ -18,6 +18,7 @@ import {
   IconTarget,
   IconCheck,
   IconUser,
+  IconLogOut,
 } from "./pages/Icons";
 import "./App.css";
 
@@ -28,32 +29,74 @@ function buildPositionLabel(profile) {
 
 export default function App() {
   const { user, profile: savedProfile } = useAuth();
-  const navigate                      = useNavigate();
-  const location                      = useLocation();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [authed, setAuthed]           = useState(!!user);
+  const [authed, setAuthed] = useState(!!user);
   const [activeEmail, setActiveEmail] = useState(user || "");
-  const [profile, setProfile]         = useState(savedProfile);
+  const [profile, setProfile] = useState(savedProfile);
 
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 900);
-  const [pathData, setPathData]       = useState(null);
-  const [userInput, setUserInput]     = useState({ current: "", goal: "" });
-  const [activeStep, setActiveStep]   = useState(null);
-  const [activeView, setActiveView]   = useState(null);
+
+  const [pathData, setPathData] = useState(() => {
+    const sessionStr = sessionStorage.getItem("nv_session");
+    if (!sessionStr) return null;
+    try {
+      const email = JSON.parse(sessionStr);
+      if (!email) return null;
+      return JSON.parse(localStorage.getItem(`nv_path_data_${email.toLowerCase()}`) || "null");
+    } catch {
+      return null;
+    }
+  });
+
+  const [userInput, setUserInput] = useState(() => {
+    const sessionStr = sessionStorage.getItem("nv_session");
+    if (!sessionStr) return { current: "", goal: "" };
+    try {
+      const email = JSON.parse(sessionStr);
+      if (!email) return { current: "", goal: "" };
+      return JSON.parse(localStorage.getItem(`nv_user_input_${email.toLowerCase()}`) || '{"current": "", "goal": ""}');
+    } catch {
+      return { current: "", goal: "" };
+    }
+  });
+
+  const [activeStep, setActiveStep] = useState(null);
+  const [activeView, setActiveView] = useState(null);
 
   function handleAuthenticated(email, profileData) {
+    console.log("[Naavi App] User authenticated:", email, "Profile:", profileData);
     setActiveEmail(email);
     setProfile(profileData);
     setAuthed(true);
+    try {
+      const emailKey = email.toLowerCase();
+      const savedPath = JSON.parse(localStorage.getItem(`nv_path_data_${emailKey}`) || "null");
+      const savedInput = JSON.parse(localStorage.getItem(`nv_user_input_${emailKey}`) || '{"current": "", "goal": ""}');
+      console.log("[Naavi App] Loaded cached data for user. Path:", savedPath, "Input:", savedInput);
+      setPathData(savedPath);
+      setUserInput(savedInput);
+    } catch (err) {
+      console.error("[Naavi App] Error parsing loaded cached data:", err);
+      setPathData(null);
+      setUserInput({ current: "", goal: "" });
+    }
     navigate("/dashboard");
   }
 
   function handleLogout() {
+    console.log("[Naavi App] User logging out. Clearing state and localStorage for email:", activeEmail);
+    if (activeEmail) {
+      localStorage.removeItem(`nv_path_data_${activeEmail.toLowerCase()}`);
+      localStorage.removeItem(`nv_user_input_${activeEmail.toLowerCase()}`);
+    }
     logout();
     setAuthed(false);
     setActiveEmail("");
     setProfile(null);
     setPathData(null);
+    setUserInput({ current: "", goal: "" });
     setActiveStep(null);
     navigate("/dashboard");
   }
@@ -61,6 +104,7 @@ export default function App() {
   if (!authed) return <AuthFlow onAuthenticated={handleAuthenticated} />;
 
   const goTo = (p) => {
+    console.log("[Naavi App] Navigation trigger to view:", p);
     const routeMap = {
       dashboard: "/dashboard",
       profile: "/profile",
@@ -75,42 +119,73 @@ export default function App() {
     }
   };
 
-  const handleGenerationStart = (input) => {
+  const handleGenerationStart = (input, isRegen = false) => {
+    console.log("[Naavi App] Generation Start requested. Input:", input, "isRegen:", isRegen);
     setUserInput(input);
-    setPathData(null); // Clear old path while generating
+    if (!isRegen) {
+      console.log("[Naavi App] Clearing old path data (not a tab-isolated regeneration).");
+      setPathData(null); // Clear old path while generating
+      if (activeEmail) {
+        localStorage.removeItem(`nv_path_data_${activeEmail.toLowerCase()}`);
+      }
+    } else {
+      console.log("[Naavi App] Tab-isolated regeneration. Retaining remaining alternative paths.");
+    }
     setSidebarOpen(false); // Auto-collapse sidebar so the path panel has full width
+    if (activeEmail) {
+      localStorage.setItem(`nv_user_input_${activeEmail.toLowerCase()}`, JSON.stringify(input));
+    }
   };
 
   const handlePathGenerated = (data, input) => {
+    console.log("[Naavi App] Path generated/updated. Data:", data, "Input:", input);
     setPathData(data);
     setUserInput(input);
     // stay on dashboard — path renders inline on right
+    if (activeEmail) {
+      localStorage.setItem(`nv_path_data_${activeEmail.toLowerCase()}`, JSON.stringify(data));
+      localStorage.setItem(`nv_user_input_${activeEmail.toLowerCase()}`, JSON.stringify(input));
+    }
+  };
+
+  const handleProfileUpdated = (newProfile) => {
+    console.log("[Naavi App] Student Signals profile updated. Resetting path cache. New profile:", newProfile);
+    setProfile(newProfile);
+    setPathData(null);
+    setUserInput({ current: "", goal: "" });
+    if (activeEmail) {
+      localStorage.removeItem(`nv_path_data_${activeEmail.toLowerCase()}`);
+      localStorage.removeItem(`nv_user_input_${activeEmail.toLowerCase()}`);
+    }
   };
 
   const handleStepClick = (step) => {
+    console.log("[Naavi App] Step selected to explore:", step);
     setActiveStep(step);
     setActiveView("macro"); // Reset back to macro when exploring a new step
     goTo("stepdetail");
   };
 
   const handleViewClick = (view) => {
+    console.log("[Naavi App] Selecting step view in marketplace details:", view);
     setActiveView(view);
     goTo("marketplace");
   };
 
   const handleBack = () => {
     const currentPath = location.pathname;
+    console.log("[Naavi App] Back button clicked from page:", currentPath);
     if (currentPath === "/marketplace") navigate("/step-detail");
     else if (currentPath === "/step-detail") navigate("/dashboard");
     else navigate("/dashboard");
   };
 
   const navItems = [
-    { key: "dashboard",   label: "Dashboard",     Icon: IconNavigation,  enabled: true },
-    { key: "stepdetail",  label: "Step Details",  Icon: IconMap,         enabled: !!activeStep },
-    { key: "marketplace", label: "Marketplace",   Icon: IconShoppingCart,enabled: !!activeStep },
-    { key: "adminreview", label: "Admin Review",  Icon: IconCheck,       enabled: true },
-    { key: "profile",     label: "Profile Details", Icon: IconUser,        enabled: true },
+    { key: "dashboard", label: "Dashboard", Icon: IconNavigation, enabled: true },
+    { key: "stepdetail", label: "Step Details", Icon: IconMap, enabled: !!activeStep },
+    { key: "marketplace", label: "Marketplace", Icon: IconShoppingCart, enabled: !!activeStep },
+    { key: "adminreview", label: "Admin Review", Icon: IconCheck, enabled: true },
+    { key: "profile", label: "Student Signals", Icon: IconUser, enabled: true },
   ];
 
   const currentPath = location.pathname;
@@ -118,11 +193,11 @@ export default function App() {
 
   return (
     <div className={`app-root maps-shell ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
-      
+
       {/* Dim backdrop mask for mobile screens */}
       {sidebarOpen && (
-        <div 
-          className="sidebar-backdrop" 
+        <div
+          className="sidebar-backdrop"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -130,20 +205,24 @@ export default function App() {
       {/* ── Sidebar ── */}
       <aside className="app-sidebar">
         <div className="sidebar-brand" onClick={() => goTo("dashboard")}>
-          <img src="/naavi_logo.png" alt="naavi logo" className="logo-image-sidebar" />
+          <img
+            src={sidebarOpen ? "/naavi_logo.png" : "/naavi_favicon.png"}
+            alt="naavi logo"
+            className="logo-image-sidebar"
+          />
           <div className="sidebar-brand-copy">
-            <span className="logo-name">Naavi</span>
-            <span className="logo-tag">AI Path Engine</span>
+            {/* <span className="logo-name">Naavi</span>
+            <span className="logo-tag">AI Path Engine</span> */}
           </div>
         </div>
 
         <nav className="sidebar-nav">
           {navItems.map(item => {
             const isActive = (item.key === "dashboard" && isDashboard) ||
-                             (item.key === "profile" && currentPath === "/profile") ||
-                             (item.key === "stepdetail" && currentPath === "/step-detail") ||
-                             (item.key === "marketplace" && currentPath === "/marketplace") ||
-                             (item.key === "adminreview" && currentPath === "/admin-review");
+              (item.key === "profile" && currentPath === "/profile") ||
+              (item.key === "stepdetail" && currentPath === "/step-detail") ||
+              (item.key === "marketplace" && currentPath === "/marketplace") ||
+              (item.key === "adminreview" && currentPath === "/admin-review");
             return (
               <button
                 key={item.key}
@@ -159,19 +238,11 @@ export default function App() {
           })}
         </nav>
 
-        {/* Active route card */}
-        <div className="sidebar-route-card">
-          <div className="section-label" style={{ marginBottom: 10 }}>Active Route</div>
-          <div className="mini-route-row">
-            <span className="mini-route-dot current" />
-            <span>{userInput.current || buildPositionLabel(profile)}</span>
-          </div>
-          <div className="mini-route-line" />
-          <div className="mini-route-row">
-            <span className="mini-route-dot goal" />
-            <span>{userInput.goal || "Destination pending"}</span>
-          </div>
-          <button className="sidebar-logout-btn" onClick={handleLogout}>Log out</button>
+        <div className="sidebar-footer">
+          <button className="sidebar-logout-btn" onClick={handleLogout} title="Log out">
+            <span className="sidebar-logout-icon"><IconLogOut size={18} /></span>
+            <span className="sidebar-logout-label">Log out</span>
+          </button>
         </div>
       </aside>
 
@@ -232,13 +303,13 @@ export default function App() {
                 onPathGenerated={handlePathGenerated}
                 onStepClick={handleStepClick}
                 onGenerationStart={handleGenerationStart}
-                onProfileUpdated={setProfile}
+                onProfileUpdated={handleProfileUpdated}
               />
             } />
             <Route path="/profile" element={
               <ProfileDetails
                 profile={profile}
-                onProfileUpdated={setProfile}
+                onProfileUpdated={handleProfileUpdated}
                 onBack={() => navigate("/dashboard")}
               />
             } />
