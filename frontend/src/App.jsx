@@ -273,15 +273,6 @@ export default function App() {
               <span>To</span>
               <strong>{userInput.goal || "Set your future goal"}</strong>
             </div>
-            {pathData && (
-              <>
-                <div className="route-search-divider" />
-                <div className="route-search-copy">
-                  <span>Steps</span>
-                  <strong>{pathData.macro_path?.length || 0} steps</strong>
-                </div>
-              </>
-            )}
           </div>
 
           <div className="topbar-profile">
