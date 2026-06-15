@@ -25,7 +25,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+ 
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 async_client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
 
