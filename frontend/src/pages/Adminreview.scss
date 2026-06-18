@@ -1220,7 +1220,25 @@
 
 @media (max-width: 660px) {
   .ar-page {
-    padding: 14px 12px 50px;
+    padding: 14px 10px calc(50px + env(safe-area-inset-bottom));
+  }
+
+  .ar-header {
+    margin-bottom: 16px;
+  }
+
+  .ar-header h1 {
+    font-size: 23px;
+    line-height: 1.25;
+  }
+
+  .ar-header-sub {
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  .ar-filters-card {
+    padding: 14px;
   }
 
   .ar-queue-card,

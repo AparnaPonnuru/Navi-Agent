@@ -1123,6 +1123,15 @@
     border-top: 1px solid var(--border);
   }
 
+  /* Once a path exists, make the result the primary mobile content. */
+  .db-root.has-path .db-right {
+    order: 1;
+  }
+
+  .db-root.has-path .db-left {
+    order: 2;
+  }
+
   /* Path view padding reduced */
   .db-path-view {
     padding: 16px 14px 48px;
@@ -1176,19 +1185,25 @@
     padding: 12px 10px 40px;
   }
 
-  /* Tabs wrap into two rows on small phones */
+  /* Keep alternatives compact and swipeable instead of stacking three rows. */
   .db-alt-tabs {
-    flex-wrap: wrap;
-    overflow-x: visible;
-    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
     padding: 4px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
   }
 
+  .db-alt-tabs::-webkit-scrollbar { display: none; }
+
   .db-alt-tab-btn {
-    flex: 1 1 calc(50% - 4px);
+    flex: 0 0 auto;
+    min-width: 164px;
     font-size: 11px;
-    padding: 8px 6px;
+    padding: 9px 10px;
     gap: 5px;
+    scroll-snap-align: start;
   }
 
   /* Route header stacks vertically */
@@ -1269,9 +1284,9 @@
 
 /* ── Extra small phones (≤ 480px) ─────────────────────────── */
 @media (max-width: 480px) {
-  /* Tabs go full-width single column */
   .db-alt-tab-btn {
-    flex: 1 1 100%;
+    flex: 0 0 auto;
+    min-width: 158px;
     font-size: 11.5px;
     padding: 9px 8px;
   }
@@ -1344,7 +1359,6 @@
     padding: 16px;
   }
 
-  .db-route-header-right,
   .db-path-actions,
   .db-step-actions,
   .db-profile-head-actions {
@@ -1352,12 +1366,81 @@
     align-items: stretch;
   }
 
-  .db-step-row {
+  /* Keep the three summary numbers compact and readable in one row. */
+  .db-route-header-right {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .db-route-stat {
+    min-width: 0;
+    padding: 10px 5px;
     flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    text-align: center;
+  }
+
+  .db-route-stat-val {
+    font-size: 15px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .db-route-stat-lbl {
+    font-size: 8px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Mobile roadmap: one number, one card, one continuous left spine. */
+  .db-step-row {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .db-step-spine {
+    width: 28px;
+    height: 100%;
+    padding-top: 12px;
   }
 
   .db-step-card {
-    padding: 16px;
+    min-width: 0;
+    width: 100%;
+    padding: 13px 12px;
+    overflow: hidden;
+  }
+
+  .db-step-card-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .db-step-title,
+  .db-step-desc,
+  .db-path-title,
+  .db-path-desc {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .db-step-title {
+    font-size: 12.5px;
+  }
+
+  .db-step-desc {
+    font-size: 10.5px;
+    -webkit-line-clamp: 3;
+  }
+
+  .db-step-dur {
+    align-self: flex-start;
   }
 
   .db-profile-edit-field-row {
@@ -1365,8 +1448,7 @@
   }
 
   .db-profile-item,
-  .db-path-stat,
-  .db-route-stat {
+  .db-path-stat {
     justify-content: space-between;
   }
 
@@ -1775,4 +1857,60 @@
     cursor: not-allowed;
     transform: none;
   }
+}
+
+.db-refine-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid;
+  border-radius: 10px;
+  animation: fadeUp 0.25s ease both;
+
+  &.success {
+    color: #166534;
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+  }
+
+  &.error {
+    color: #b42318;
+    background: #fff5f5;
+    border-color: #fecaca;
+  }
+
+  strong {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  p {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.55;
+    color: inherit;
+  }
+}
+
+.db-refine-result-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+  background: #16a34a;
+
+  svg {
+    color: #fff;
+  }
+}
+
+.db-refine-result.error .db-refine-result-icon {
+  background: #dc2626;
 }

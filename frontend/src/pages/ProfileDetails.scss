@@ -355,13 +355,38 @@
 
 @media (max-width: 760px) {
   .profile-details-container {
-    padding: 20px 14px 50px;
+    padding: 14px 10px calc(50px + env(safe-area-inset-bottom));
+  }
+
+  .profile-header-nav {
+    display: none;
   }
 
   .profile-hero-banner {
-    padding: 20px;
+    padding: 22px 16px;
     flex-direction: column;
     text-align: center;
+  }
+
+  .profile-avatar-circle {
+    width: 76px;
+    height: 76px;
+  }
+
+  .profile-avatar-initials {
+    font-size: 27px;
+  }
+
+  .profile-hero-info h2 {
+    font-size: 21px;
+  }
+
+  .profile-info-form {
+    padding: 16px 12px;
+  }
+
+  .profile-section-card {
+    padding: 18px 14px;
   }
 
   .profile-hero-info {

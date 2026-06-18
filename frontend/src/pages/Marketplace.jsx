@@ -292,6 +292,18 @@ function getCtaLabel(category, view) {
   return "Visit Platform";
 }
 
+function classifyMarketplaceItem(item) {
+  const explicitCategory = (item.category || "").toLowerCase();
+  if (CATEGORIES.some(category => category.key === explicitCategory)) return explicitCategory;
+
+  const type = (item.type || "").toLowerCase();
+  const name = (item.name || "").toLowerCase();
+  if (type.includes("mentor") || type.includes("coach") || type.includes("expert") || type.includes("advisor") || type.includes("review") || type.includes("tutoring") || type.includes("specialist") || type.includes("counselor") || name.includes("mentor") || name.includes("coach")) return "mentors";
+  if (type.includes("university") || type.includes("college") || type.includes("school") || type.includes("institute") || type.includes("academy") || name.includes("university") || name.includes("college") || name.includes("institute") || name.includes("academy")) return "institutions";
+  if (type.includes("youtube") || type.includes("docs") || type.includes("community") || type.includes("book") || type.includes("library") || type.includes("articles") || type.includes("github") || type.includes("publication") || type.includes("channel") || type.includes("guide") || name.includes("youtube") || name.includes("book") || name.includes("guide")) return "distributors";
+  return "vendors";
+}
+
 export default function Marketplace({ step, view }) {
   const [activeCategory, setActiveCategory] = useState("mentors");
   const [activeView, setActiveView] = useState(view || "macro");
@@ -309,17 +321,7 @@ export default function Marketplace({ step, view }) {
       // Check if AI generated items have any entries for this category in the current view
       const viewKey = activeView === "macro" ? "macro_free" : activeView === "micro" ? "micro_structured" : "nano_expert";
       const hasDynamic = (step?.marketplace?.[viewKey] || []).some(item => {
-        const type = (item.type || "").toLowerCase();
-        const name = (item.name || "").toLowerCase();
-        let itemCat = "vendors";
-        if (type.includes("mentor") || type.includes("coach") || type.includes("expert") || type.includes("advisor") || type.includes("review") || type.includes("tutoring") || type.includes("specialist") || type.includes("counselor") || name.includes("mentor") || name.includes("coach")) {
-          itemCat = "mentors";
-        } else if (type.includes("university") || type.includes("college") || type.includes("school") || type.includes("institute") || type.includes("academy") || name.includes("university") || name.includes("college") || name.includes("institute") || name.includes("academy")) {
-          itemCat = "institutions";
-        } else if (type.includes("youtube") || type.includes("docs") || type.includes("community") || type.includes("book") || type.includes("library") || type.includes("articles") || type.includes("github") || type.includes("publication") || type.includes("channel") || type.includes("guide") || name.includes("youtube") || name.includes("book") || name.includes("guide")) {
-          itemCat = "distributors";
-        }
-        return itemCat === cat.key;
+        return classifyMarketplaceItem(item) === cat.key;
       });
       
       return hasMock || hasDynamic;
@@ -347,17 +349,7 @@ export default function Marketplace({ step, view }) {
       const rawItems = step.marketplace[viewKey] || [];
       
       rawItems.forEach(item => {
-        const type = (item.type || "").toLowerCase();
-        const name = (item.name || "").toLowerCase();
-        
-        let category = "vendors"; // Default fallback
-        if (type.includes("mentor") || type.includes("coach") || type.includes("expert") || type.includes("advisor") || type.includes("review") || type.includes("tutoring") || type.includes("specialist") || type.includes("counselor") || name.includes("mentor") || name.includes("coach")) {
-          category = "mentors";
-        } else if (type.includes("university") || type.includes("college") || type.includes("school") || type.includes("institute") || type.includes("academy") || name.includes("university") || name.includes("college") || name.includes("institute") || name.includes("academy")) {
-          category = "institutions";
-        } else if (type.includes("youtube") || type.includes("docs") || type.includes("community") || type.includes("book") || type.includes("library") || type.includes("articles") || type.includes("github") || type.includes("publication") || type.includes("channel") || type.includes("guide") || name.includes("youtube") || name.includes("book") || name.includes("guide")) {
-          category = "distributors";
-        }
+        const category = classifyMarketplaceItem(item);
         
         if (category === currentCategory) {
           const price = item.cost || item.price || (activeView === "macro" ? "Free" : "Varies");
@@ -755,7 +747,6 @@ export default function Marketplace({ step, view }) {
 
         @media (max-width: 760px) {
           .mp-view-tabs,
-          .mp-cats,
           .mp-card-bottom,
           .mp-card-top,
           .mp-card-price-line,
@@ -764,11 +755,37 @@ export default function Marketplace({ step, view }) {
             align-items: stretch;
           }
 
-          .mp-view-btn,
-          .mp-cat-btn,
           .btn-primary.mp-connect-btn,
           .mp-search-wrap {
             width: 100%;
+          }
+
+          .mp-header { margin-bottom: 16px; }
+          .mp-header .display-title { font-size: 25px; }
+
+          .mp-view-tabs,
+          .mp-cats {
+            flex-direction: row;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            padding-bottom: 3px;
+          }
+          .mp-view-tabs::-webkit-scrollbar,
+          .mp-cats::-webkit-scrollbar { display: none; }
+
+          .mp-view-btn {
+            flex: 0 0 150px;
+            min-width: 150px;
+            padding: 9px 12px;
+          }
+
+          .mp-cat-btn {
+            flex: 0 0 auto;
+            width: auto;
+            padding: 9px 14px;
+            white-space: nowrap;
           }
 
           .mp-grid,

@@ -169,10 +169,23 @@ export default function StepDetail({ step, initialView = "macro", onViewClick })
         .sd-market-cta-text { flex: 1; }
 
         @media (max-width: 760px) {
+          .sd-header { padding: 18px 16px; margin-bottom: 16px; }
+          .sd-title { font-size: 18px; line-height: 1.35; }
+          .sd-desc { font-size: 12.5px; line-height: 1.65; }
+          .sd-tabs { gap: 6px; margin-bottom: 18px; flex-wrap: nowrap; }
+          .sd-tab { min-width: 0; padding: 10px 6px; gap: 5px; font-size: 12.5px; }
+          .sd-tab-icon svg { width: 17px; height: 17px; }
+          .sd-view-intro { margin-bottom: 14px; gap: 8px; }
+          .sd-view-desc { font-size: 12px; flex: 1; }
+          .step-reading-card { padding: 18px 16px; margin-bottom: 18px; }
+          .macro-ov-body { font-size: 12.5px; line-height: 1.7; }
+
           .sd-market-cta {
             flex-direction: column;
             align-items: stretch;
             gap: 16px;
+            padding: 18px 16px;
+            margin-top: 24px;
           }
 
           .sd-market-cta-text {
@@ -186,6 +199,7 @@ export default function StepDetail({ step, initialView = "macro", onViewClick })
           .nano-opt {
             flex-direction: column;
             align-items: stretch;
+            padding: 16px;
           }
 
           .nano-opt-icon {

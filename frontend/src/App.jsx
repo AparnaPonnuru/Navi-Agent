@@ -294,33 +294,33 @@ export default function App() {
       <div className="app-workspace">
 
         {/* Topbar */}
-        <header className="maps-topbar">
-          <button className="hamburger-btn" onClick={() => setSidebarOpen(o => !o)}>
+        <header className={`maps-topbar ${!isDashboard ? "has-back" : ""}`}>
+          <button className="hamburger-btn" onClick={() => setSidebarOpen(o => !o)} aria-label="Open navigation menu">
             <IconMenu size={20} />
           </button>
 
           {!isDashboard && (
-            <button className="nav-back" onClick={handleBack}>
-              <IconArrowLeft size={15} /> Back
+            <button className="nav-back" onClick={handleBack} aria-label="Go back">
+              <IconArrowLeft size={15} /> <span className="nav-back-label">Back</span>
             </button>
           )}
 
-          <div className="route-searchbar">
+          <div className="route-searchbar" aria-label="Current career route">
             <div className="route-search-point"><IconPin size={14} /></div>
-            <div className="route-search-copy">
+            <div className="route-search-copy route-from">
               <span>From</span>
               <strong>{userInput?.current || buildPositionLabel(profile)}</strong>
             </div>
             <div className="route-search-divider" />
             <div className="route-search-point goal"><IconTarget size={14} /></div>
-            <div className="route-search-copy">
+            <div className="route-search-copy route-to">
               <span>To</span>
               <strong>{userInput?.goal || "Set your future goal"}</strong>
             </div>
             {pathData && (
               <>
                 <div className="route-search-divider" />
-                <div className="route-search-copy">
+                <div className="route-search-copy route-steps">
                   <span>Steps</span>
                   <strong>
                     {(pathData?.alternatives

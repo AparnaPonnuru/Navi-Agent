@@ -126,7 +126,7 @@ export default function AuthFlow({ onAuthenticated }) {
               onKeyDown={e => e.key === "Enter" && handleLogin()}
               autoFocus
             />
-            <span className="auth-field-note">Default admin login uses the email pathengine.admin@gmail.com.</span>
+           
           </div>
 
           <div className="auth-field-group">

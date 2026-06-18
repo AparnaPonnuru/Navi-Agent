@@ -107,16 +107,20 @@ update the description for step 1 to highlight IGCSE and SAT preparation goals
 
 ---
 
-## 🛍️ SECTION 5 — Marketplace (All Vendors / Resources)
+## 🛍️ SECTION 5 — Marketplace (Strict Scoped Updates)
 
-The **Marketplace** has 3 sub-sections:
-- **Free Resources** tab → `macro_free` (Vendors like Coursera, YouTube, Khan Academy)
-- **Paid Courses** tab → `micro_structured` (Udemy, Coursera paid, Books)
-- **Mentors/Coaches** tab → `nano_expert` (Mentors, Coaching sessions)
+Marketplace prompts have two independent scopes:
 
-### 5A — Update Free Resources (Vendors tab)
+- **View:** Macro (`macro_free`), Micro (`micro_structured`), or Nano (`nano_expert`)
+- **Category:** Mentors, Vendors, Institutions, or Distributors
+
+Only the requested category inside the requested view is replaced. Every other category, view, step, and roadmap field is preserved exactly.
+
+If the prompt does not name a view, it defaults to the **Macro Marketplace**. Therefore `update the marketplace mentors for step 1` updates only **Step 1 → Macro → Mentors** and does not modify Vendors.
+
+### 5A — Update Macro Marketplace Vendors
 ```
-update the marketplace vendors for step [step number]
+update the macro marketplace vendors for step [step number]
 ```
 ```
 refresh the free resources in the marketplace for step [step number]
@@ -133,9 +137,9 @@ add more relevant free resource vendors to step [step number] marketplace
 update the marketplace vendors for step 1 with AI-focused free learning platforms
 ```
 
-### 5B — Update Paid Courses (Micro/Structured section)
+### 5B — Update Micro Marketplace Vendors / Courses
 ```
-update the paid courses in the marketplace for step [step number]
+update the micro marketplace vendors for step [step number]
 ```
 ```
 refresh the course recommendations in step [step number] marketplace
@@ -149,9 +153,9 @@ add better certification courses to the marketplace for step [step number]
 update the paid courses in the marketplace for step 2 with machine learning certifications
 ```
 
-### 5C — Update Mentors / Expert Coaching (Nano section)
+### 5C — Update Marketplace Mentors
 ```
-update the mentor recommendations in the marketplace for step [step number]
+update the marketplace mentors for step [step number]
 ```
 ```
 refresh the coaching options in step [step number] marketplace
@@ -162,7 +166,24 @@ add expert mentors to the marketplace for step [step number]
 
 **Example:**
 ```
-update the mentor recommendations in the marketplace for step 1 with AI tutors
+update the marketplace mentors for step 1 with AI tutors
+```
+
+The example above targets Macro mentors because the view is omitted. Name another view explicitly when needed:
+
+```
+update the micro marketplace mentors for step 1 with project coaches
+```
+```
+update the nano marketplace mentors for step 1 with admissions experts
+```
+
+### 5D — Update Institutions or Distributors
+```
+update the macro marketplace institutions for step [step number]
+```
+```
+update the macro marketplace distributors for step [step number]
 ```
 
 ---
@@ -221,7 +242,7 @@ make the whole pathway more suitable for a Grade 10 student
 | Always include **"step [number]"** for surgical updates | Don't say "step one" — use the number: "step 1" |
 | Wait for the green ✅ message before clicking Refine | Don't click Refine if Naavi shows a red ❌ message |
 | Be specific about what you want changed | Don't use vague prompts like "make it better" |
-| Use "marketplace" or "vendor" for marketplace updates | Don't say "update resources in macro section of step 1" — Naavi may get confused |
+| Name the Marketplace category you want changed | Don't omit the category when you require a strict scoped update |
 
 ---
 
@@ -240,6 +261,9 @@ update the description for step 1
 update the marketplace vendors for step 1
 ```
 ```
+update the marketplace mentors for step 1
+```
+```
 update the checklist for step 1
 ```
 ```
@@ -256,9 +280,13 @@ update the nano view for step 3
 | Micro View | `micro view`, `micro tab`, `detailed view` |
 | Nano View | `nano view`, `nano tab`, `expert view` |
 | Description | `description`, `desc`, `summary` |
-| Marketplace Free | `vendor`, `vendors`, `marketplace`, `free resources`, `market` |
-| Marketplace Paid | `paid courses`, `course`, `certification`, `bootcamp`, `platform` |
-| Marketplace Mentors | `mentor`, `coaching`, `provider`, `expert session` |
+| Marketplace Macro View | `macro`, `free resources`; defaults here when omitted |
+| Marketplace Micro View | `micro`, `paid`, `structured` |
+| Marketplace Nano View | `nano`, `expert session` |
+| Marketplace Mentors | `mentor`, `coaching`, `coach` |
+| Marketplace Vendors | `vendor`, `platform`, `course`, `certification`, `bootcamp` |
+| Marketplace Institutions | `institution`, `university`, `college`, `school` |
+| Marketplace Distributors | `distributor`, `YouTube`, `book`, `docs`, `community` |
 | Step Checklist | `checklist`, `micro steps`, `todo`, `tasks list` |
 
 ---

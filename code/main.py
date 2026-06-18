@@ -478,14 +478,21 @@ def recursive_sanitize(obj, name_tokens: list):
     return obj
 
 # Helper to query Groq and extract clean JSON with model fallbacks
-async def query_groq_json(prompt: str, preferred_model: str = "llama-3.1-8b-instant") -> dict:
-    models = [
-        preferred_model,
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "qwen/qwen3-32b",
-        "openai/gpt-oss-20b"
-    ]
+async def query_groq_json(
+    prompt: str,
+    preferred_model: str = "llama-3.1-8b-instant",
+    fallback_models: Optional[List[str]] = None,
+) -> dict:
+    models = [preferred_model] + (
+        fallback_models
+        if fallback_models is not None
+        else [
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-versatile",
+            "qwen/qwen3-32b",
+            "openai/gpt-oss-20b",
+        ]
+    )
 
 
 
@@ -1192,19 +1199,27 @@ async def run_agent_1_blueprint(current: str, goal: str, profile: dict, refine_p
             }
             prompt += f"\nEXISTING ROADMAP (use this as the base reference to modify only what the user requested, leaving other steps unchanged):\n{json.dumps(compressed_roadmap, indent=2)}\n"
     print(f"[Agent 1] Generating initial roadmap blueprint (focus: {focus or 'default'}) using 70B...")
-    res = await query_groq_json(prompt, preferred_model="llama-3.3-70b-versatile")
-    
-    # If the daily token limit is exhausted, query_groq_json returns {}
-    if not res or "macro_path" not in res:
-        print("[Rate Limit Warning] Daily token limit exceeded. Serving board-calibrated fallback roadmap.")
-        # Try the 8B model before falling back to the static mock.
-        res = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
-        if not res or "macro_path" not in res:
-            # Full lockout: serve high-fidelity static mock custom-built for CBSE/Cambridge
-            return get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus)
-            
-    if requested_steps and res:
+    # Keep Agent 1 retries bounded. The generic helper previously cycled through
+    # five models and this function then started a second full retry cycle.
+    res = await query_groq_json(
+        prompt,
+        preferred_model="llama-3.3-70b-versatile",
+        fallback_models=["llama-3.1-8b-instant"],
+    )
+
+    if requested_steps and is_complete_blueprint(res, current, profile):
         res = scale_blueprint_steps(res, requested_steps)
+
+    # Reject truncated/repaired responses that contain only the first milestone.
+    # A complete fallback is safer than displaying a one-step 36-month pathway.
+    if not is_complete_blueprint(res, current, profile, requested_steps):
+        received_steps = len(res.get("macro_path", [])) if isinstance(res, dict) else 0
+        print(
+            f"[Blueprint Validation] Incomplete model roadmap ({received_steps} steps). "
+            "Serving board-calibrated fallback roadmap."
+        )
+        return get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus)
+
     return res
 
 async def run_agent_2_path_auditor(blueprint: dict, current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, existing_roadmap: Optional[dict] = None) -> dict:
@@ -1302,6 +1317,30 @@ def build_agent_statuses(active_agent: str = None, completed_agents: list = None
     if active_agent:
         statuses[active_agent] = "active"
     return statuses
+
+
+def minimum_blueprint_steps(current: str, profile: dict) -> int:
+    grade_text = f"{profile.get('grade') or ''} {current}".lower()
+    if "10" in grade_text or "11" in grade_text or "tenth" in grade_text or "eleventh" in grade_text:
+        return 8
+    if "12" in grade_text or "twelfth" in grade_text:
+        return 6
+    return 6
+
+
+def is_complete_blueprint(
+    blueprint: Any,
+    current: str,
+    profile: dict,
+    requested_steps: Optional[int] = None,
+) -> bool:
+    if not isinstance(blueprint, dict) or blueprint.get("error"):
+        return False
+    milestones = blueprint.get("macro_path")
+    if not isinstance(milestones, list):
+        return False
+    required_steps = requested_steps or minimum_blueprint_steps(current, profile)
+    return len(milestones) >= required_steps
 
 
 def sse_payload(event: str, data: dict) -> str:
@@ -1483,7 +1522,7 @@ async def generate_path_stream(req: PathGenerationRequest):
             yield sse_payload("status", {
                 "statuses": build_agent_statuses("agent1", completed),
                 "progress": 20,
-                "message": "Generating alternative blueprint paths..."
+                "message": "Creating three pathway alternatives..."
             })
 
             foci = [
@@ -1503,17 +1542,66 @@ async def generate_path_stream(req: PathGenerationRequest):
                     foci = [foci[matched_idx]]
                     option_names = [option_names[matched_idx]]
 
-            # 1. Run Agent 1 in parallel
-            blueprint_tasks = [
-                run_agent_1_blueprint(current, goal, profile, refine_prompt, existing_roadmap, focus=focus)
-                for focus in foci
-            ]
-            blueprints = await asyncio.gather(*blueprint_tasks, return_exceptions=True)
+            # Run Agent 1 alternatives in parallel, but keep yielding events while
+            # the model calls are in flight. A single gather() made the stream sit
+            # at 20% until every alternative had finished.
+            blueprint_tasks = {
+                asyncio.create_task(
+                    run_agent_1_blueprint(
+                        current, goal, profile, refine_prompt, existing_roadmap, focus=focus
+                    )
+                ): index
+                for index, focus in enumerate(foci)
+            }
+            blueprints = [None] * len(foci)
+            pending_tasks = set(blueprint_tasks)
+            finished_count = 0
+            stage_progress = 20
+
+            while pending_tasks:
+                done, pending_tasks = await asyncio.wait(
+                    pending_tasks,
+                    timeout=3,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                # A status heartbeat keeps the SSE response flowing through
+                # browsers and reverse proxies during long model calls.
+                if not done:
+                    stage_progress = min(39, stage_progress + 1)
+                    yield sse_payload("status", {
+                        "statuses": build_agent_statuses("agent1", completed),
+                        "progress": stage_progress,
+                        "message": f"Creating pathway alternatives... ({finished_count} of {len(foci)} ready)"
+                    })
+                    continue
+
+                for task in done:
+                    index = blueprint_tasks[task]
+                    try:
+                        blueprints[index] = task.result()
+                    except Exception as exc:
+                        blueprints[index] = exc
+                    finished_count += 1
+
+                stage_progress = max(
+                    stage_progress,
+                    20 + round(20 * finished_count / len(foci)),
+                )
+                yield sse_payload("status", {
+                    "statuses": build_agent_statuses("agent1", completed),
+                    "progress": stage_progress,
+                    "message": f"Creating pathway alternatives... ({finished_count} of {len(foci)} ready)"
+                })
 
             valid_blueprints = []
             for i, bp in enumerate(blueprints):
-                if isinstance(bp, Exception) or not bp or "macro_path" not in bp:
-                    print(f"Blueprint {i} generation failed or returned error. Falling back.")
+                if isinstance(bp, Exception) or not is_complete_blueprint(bp, current, profile):
+                    received_steps = len(bp.get("macro_path", [])) if isinstance(bp, dict) else 0
+                    print(
+                        f"Blueprint {i} was incomplete ({received_steps} steps). "
+                        "Using the complete fallback roadmap."
+                    )
                     valid_blueprints.append(get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus=foci[i]))
                 else:
                     valid_blueprints.append(bp)
@@ -1522,17 +1610,59 @@ async def generate_path_stream(req: PathGenerationRequest):
             yield sse_payload("status", {
                 "statuses": build_agent_statuses("agent2", completed),
                 "progress": 50,
-                "message": "Auditing and refining pathway options..."
+                "message": "Validating pathway titles, goals, and readiness..."
             })
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.15)
 
-            completed.extend(["agent2", "agent3", "agent4"])
+            # Agent 2: normalize path-level fields for every alternative.
+            for i, bp in enumerate(valid_blueprints):
+                bp["path_title"] = bp.get("path_title") or f"{option_names[i]} Pathway to {goal}"
+                bp["path_description"] = bp.get("path_description") or f"A structured pathway from {current} to {goal}."
+
+            completed.append("agent2")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("agent3", completed),
+                "progress": 65,
+                "message": "Checking milestone coverage and step sequence..."
+            })
+            await asyncio.sleep(0.15)
+
+            # Agent 3: enforce complete, sequential milestone collections.
+            for i, bp in enumerate(valid_blueprints):
+                if not is_complete_blueprint(bp, current, profile):
+                    bp = get_fallback_mock_roadmap(current, goal, profile, refine_prompt, focus=foci[i])
+                    valid_blueprints[i] = bp
+                for step_number, milestone in enumerate(bp["macro_path"], start=1):
+                    milestone["id"] = step_number
+
+            completed.append("agent3")
+            yield sse_payload("status", {
+                "statuses": build_agent_statuses("agent4", completed),
+                "progress": 80,
+                "message": "Checking learning resources and action checklists..."
+            })
+            await asyncio.sleep(0.15)
+
+            # Agent 4: guarantee usable resources/checklists for every milestone.
+            for i, bp in enumerate(valid_blueprints):
+                for milestone in bp["macro_path"]:
+                    if not milestone.get("marketplace"):
+                        milestone["marketplace"] = get_mock_marketplace(foci[i])
+                    if not milestone.get("micro_steps"):
+                        milestone["micro_steps"] = [
+                            {
+                                "task": f"Complete the planned work for {milestone.get('title', 'this milestone')}",
+                                "resource": "Naavi progress tracker",
+                            }
+                        ]
+
+            completed.append("agent4")
             yield sse_payload("status", {
                 "statuses": build_agent_statuses("ready", completed),
                 "progress": 90,
                 "message": "Preparing final recommendations..."
             })
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.15)
 
             # 3. Process outputs directly (directly calculate metrics within build_and_store_final_path)
             final_alternatives = []
@@ -1560,7 +1690,15 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "message": f"Path generation failed: {str(e)}. Please try again."
             })
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @app.post("/api/path")
 async def generate_path(req: PathGenerationRequest):
@@ -1921,6 +2059,109 @@ class StepPatchRequest(BaseModel):
     current_position: str
     target_goal: str
     profile: Optional[dict] = None
+    marketplace_section: Optional[str] = None
+    marketplace_category: Optional[str] = None
+
+
+MARKETPLACE_SECTIONS = {"macro_free", "micro_structured", "nano_expert"}
+MARKETPLACE_CATEGORIES = {"mentors", "vendors", "institutions", "distributors"}
+
+
+def marketplace_item_category(item: dict) -> str:
+    """Match the Marketplace UI's category classification."""
+    explicit_category = str(item.get("category") or "").lower()
+    if explicit_category in MARKETPLACE_CATEGORIES:
+        return explicit_category
+    item_type = str(item.get("type") or "").lower()
+    name = str(item.get("name") or "").lower()
+    if any(word in item_type or word in name for word in (
+        "mentor", "coach", "expert", "advisor", "review", "tutoring", "specialist", "counselor"
+    )):
+        return "mentors"
+    if any(word in item_type or word in name for word in (
+        "university", "college", "school", "institute", "academy"
+    )):
+        return "institutions"
+    if any(word in item_type or word in name for word in (
+        "youtube", "docs", "community", "book", "library", "articles", "github",
+        "publication", "channel", "guide"
+    )):
+        return "distributors"
+    return "vendors"
+
+
+def merge_marketplace_category(
+    current_marketplace: dict,
+    section: str,
+    category: str,
+    generated_items: list,
+) -> dict:
+    """Replace exactly one category in one view while preserving all other data."""
+    current_section = current_marketplace.get(section, [])
+    if not isinstance(current_section, list):
+        current_section = []
+    preserved_items = [
+        item for item in current_section
+        if not isinstance(item, dict) or marketplace_item_category(item) != category
+    ]
+    tagged_items = []
+    for item in generated_items:
+        tagged_item = dict(item)
+        tagged_item["category"] = category
+        tagged_items.append(tagged_item)
+
+    new_marketplace = json.loads(json.dumps(current_marketplace))
+    new_marketplace.setdefault("macro_free", [])
+    new_marketplace.setdefault("micro_structured", [])
+    new_marketplace.setdefault("nano_expert", [])
+    new_marketplace[section] = preserved_items + tagged_items
+    return new_marketplace
+
+
+MARKETPLACE_CATEGORY_PATCH_PROMPT = """You are the Naaviverse Marketplace Patch Agent.
+Generate ONLY replacement items for one Marketplace category inside one step.
+
+Step ID: {step_id}
+Step title: {step_title}
+Step duration: {step_duration}
+Marketplace section: {marketplace_section}
+Marketplace category: {marketplace_category}
+Current items in this exact category:
+{current_items}
+
+Student context:
+- Current position: {current_position}
+- Target goal: {target_goal}
+- Profile: {profile}
+
+User instruction: {instruction}
+
+Rules:
+- Return 3 to 5 fresh, relevant, real-world items for ONLY the "{marketplace_category}" category.
+- Do not return or discuss any other Marketplace category or section.
+- Keep every item relevant to the step title, student context, and target goal.
+- Do not include the student's name, email, or personal identifiers.
+- Output valid JSON only using this exact structure:
+{{
+  "marketplace_items": [
+    {{
+      "name": "<specific name>",
+      "type": "<category-appropriate type>",
+      "why": "<why it fits this step>",
+      "next_step": "<specific action>",
+      "cost": "<cost or Free>",
+      "duration": "<duration or session format>",
+      "tags": ["<tag>", "<tag>"]
+    }}
+  ]
+}}
+
+Type requirements:
+- mentors: use Mentor, Coach, Counselor, Advisor, or Expert review
+- vendors: use Course, Platform, Certification, Bootcamp, or Free course
+- institutions: use University, College, School, Institute, or Academy
+- distributors: use Book, YouTube, Docs, Community, Library, Guide, or Publication
+"""
 
 STEP_PATCH_PROMPT = """You are the Naaviverse Step Patch Agent.
 Your ONLY job is to rewrite ONE specific field inside ONE step of a career roadmap.
@@ -2013,6 +2254,67 @@ async def patch_step(req: StepPatchRequest):
         raise HTTPException(status_code=400, detail=f"Field must be one of: {', '.join(allowed_fields)}")
 
     current_val = req.current_step.get(req.field, "")
+
+    if req.field == "marketplace":
+        section = req.marketplace_section or "macro_free"
+        category = req.marketplace_category or "vendors"
+        if section not in MARKETPLACE_SECTIONS:
+            raise HTTPException(status_code=400, detail="Invalid marketplace subsection")
+        if category not in MARKETPLACE_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Invalid marketplace category")
+
+        current_marketplace = current_val if isinstance(current_val, dict) else {}
+        current_section = current_marketplace.get(section, [])
+        if not isinstance(current_section, list):
+            current_section = []
+        current_category_items = [
+            item for item in current_section
+            if isinstance(item, dict) and marketplace_item_category(item) == category
+        ]
+
+        prompt = MARKETPLACE_CATEGORY_PATCH_PROMPT.format(
+            step_id=req.step_id,
+            step_title=req.current_step.get("title", f"Step {req.step_id}"),
+            step_duration=req.current_step.get("duration", ""),
+            marketplace_section=section,
+            marketplace_category=category,
+            current_items=json.dumps(current_category_items, indent=2),
+            current_position=req.current_position,
+            target_goal=req.target_goal,
+            profile=json.dumps(req.profile or {}),
+            instruction=req.instruction,
+        )
+
+        print(
+            f"[Patch Agent] Patching step {req.step_id} marketplace "
+            f"section '{section}', category '{category}'."
+        )
+        result = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
+        generated_items = result.get("marketplace_items") if isinstance(result, dict) else None
+        if not isinstance(generated_items, list) or not generated_items:
+            raise HTTPException(status_code=500, detail="Marketplace patch failed to return category items. Please try again.")
+        generated_items = [item for item in generated_items if isinstance(item, dict) and item.get("name")]
+        if not generated_items:
+            raise HTTPException(status_code=500, detail="Marketplace patch returned invalid category items. Please try again.")
+        # The model cannot overwrite unrelated data. Merge only the requested
+        # category in the requested subsection and preserve everything else.
+        new_marketplace = merge_marketplace_category(
+            current_marketplace, section, category, generated_items
+        )
+
+        profile = req.profile or {}
+        name_tokens = build_name_patterns(profile, req.current_position)
+        if name_tokens:
+            new_marketplace = recursive_sanitize(new_marketplace, name_tokens)
+
+        return {
+            "step_id": req.step_id,
+            "field": req.field,
+            "marketplace_section": section,
+            "marketplace_category": category,
+            "updated_value": new_marketplace,
+        }
+
     if isinstance(current_val, (dict, list)):
         current_value_str = json.dumps(current_val, indent=2)
     else:

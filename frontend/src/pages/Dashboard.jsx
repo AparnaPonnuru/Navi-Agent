@@ -18,10 +18,10 @@ const LOADING_MSGS = [
 ];
 
 const WORKFLOW_STEPS = [
-  { key: "agent1", title: "Agent 1", message: "Analyzing your profile..." },
-  { key: "agent2", title: "Agent 2", message: "Building your roadmap..." },
-  { key: "agent3", title: "Agent 3", message: "Refining milestones and checklists..." },
-  { key: "agent4", title: "Agent 4", message: "Finding learning resources..." },
+  { key: "agent1", title: "Agent 1", message: "Creating pathway alternatives..." },
+  { key: "agent2", title: "Agent 2", message: "Validating goals and readiness..." },
+  { key: "agent3", title: "Agent 3", message: "Checking milestones and checklists..." },
+  { key: "agent4", title: "Agent 4", message: "Checking learning resources..." },
   { key: "ready", title: "Path Ready", message: "Preparing final recommendations..." },
 ];
 
@@ -187,6 +187,8 @@ function parseSurgicalRefinement(prompt, steps) {
   if (!targetStep) return null;
   
   let field = null;
+  let marketplaceSection = null;
+  let marketplaceCategory = null;
 
   // ── PRIORITY 1: Marketplace / vendor keywords (must come before "macro" check
   //    because users often say "marketplace for the macro section" and the word
@@ -204,6 +206,28 @@ function parseSurgicalRefinement(prompt, steps) {
     text.includes("certification")
   ) {
     field = "marketplace";
+
+    // Marketplace scope is explicit and deterministic. Category words describe
+    // WHAT changes; macro/micro/nano words describe WHERE it changes.
+    if (text.includes("mentor") || text.includes("coach") || text.includes("coaching")) {
+      marketplaceCategory = "mentors";
+    } else if (text.includes("institution") || text.includes("university") || text.includes("college") || text.includes("school")) {
+      marketplaceCategory = "institutions";
+    } else if (text.includes("distributor") || text.includes("youtube") || text.includes("book") || text.includes("docs") || text.includes("community")) {
+      marketplaceCategory = "distributors";
+    } else {
+      marketplaceCategory = "vendors";
+    }
+
+    if (text.includes("nano") || text.includes("expert session")) {
+      marketplaceSection = "nano_expert";
+    } else if (text.includes("micro") || text.includes("paid") || text.includes("structured")) {
+      marketplaceSection = "micro_structured";
+    } else {
+      // Marketplace opens on Macro by default, so an unqualified request such
+      // as "update marketplace mentors" targets Macro mentors.
+      marketplaceSection = "macro_free";
+    }
 
   // ── PRIORITY 2: micro_steps (before generic "micro" check)
   } else if (
@@ -255,7 +279,9 @@ function parseSurgicalRefinement(prompt, steps) {
     stepId,
     field,
     targetStep,
-    instruction: prompt
+    instruction: prompt,
+    marketplaceSection,
+    marketplaceCategory,
   };
 }
 
@@ -276,6 +302,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   const [error, setError] = useState("");
   const [activeStep, setActiveStep] = useState(null);
   const [refinePrompt, setRefinePrompt] = useState("");
+  const [refineResult, setRefineResult] = useState(null);
   const [savingPath, setSavingPath] = useState(false);
   const [regeneratingIdx, setRegeneratingIdx] = useState(null);
 
@@ -387,7 +414,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   const isGoalValid = goal.trim() !== "" && goalAnalysis.missing.length === 0;
   const missingFieldsText = goalAnalysis.missing.join(", ").replace(/, ([^,]*)$/, ' and $1');
 
-  // Progress follows completed backend stages, not elapsed time.
+  // Progress follows backend stages plus bounded heartbeats during long model calls.
   const [loaderProgress, setLoaderProgress] = useState(0);
   const [workflowStatus, setWorkflowStatus] = useState({
     agent1: "pending",
@@ -438,26 +465,27 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
       }
 
       buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
+      // SSE may use LF or CRLF depending on the server/proxy.
+      const events = buffer.split(/\r?\n\r?\n/);
       buffer = events.pop() || "";
 
       for (const rawEvent of events) {
-        const lines = rawEvent.split("\n");
+        const lines = rawEvent.split(/\r?\n/);
         const eventType = lines.find(line => line.startsWith("event:"))?.replace("event:", "").trim() || "message";
-        const dataLine = lines.find(line => line.startsWith("data:"));
-        if (!dataLine) continue;
+        const dataLines = lines.filter(line => line.startsWith("data:"));
+        if (!dataLines.length) continue;
 
-        const eventData = JSON.parse(dataLine.replace("data:", "").trim());
+        const eventData = JSON.parse(dataLines.map(line => line.slice(5).trimStart()).join("\n"));
         handleStreamEvent(eventType, eventData, resultRef);
       }
     }
 
     if (buffer.trim()) {
-      const lines = buffer.split("\n");
+      const lines = buffer.split(/\r?\n/);
       const eventType = lines.find(line => line.startsWith("event:"))?.replace("event:", "").trim() || "message";
-      const dataLine = lines.find(line => line.startsWith("data:"));
-      if (dataLine) {
-        const eventData = JSON.parse(dataLine.replace("data:", "").trim());
+      const dataLines = lines.filter(line => line.startsWith("data:"));
+      if (dataLines.length) {
+        const eventData = JSON.parse(dataLines.map(line => line.slice(5).trimStart()).join("\n"));
         handleStreamEvent(eventType, eventData, resultRef);
       }
     }
@@ -491,6 +519,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
       console.log("[Naavi Dashboard] Smart Router: Detected surgical step update request:", surgicalInfo);
       setLoading(true);
       setError("");
+      setRefineResult(null);
       setLoadMsg(`Updating Step ${surgicalInfo.stepId} ${surgicalInfo.field} with AI...`);
       
       try {
@@ -503,6 +532,10 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
           target_goal: goal,
           profile: profile || {}
         };
+        if (surgicalInfo.field === "marketplace") {
+          payload.marketplace_section = surgicalInfo.marketplaceSection;
+          payload.marketplace_category = surgicalInfo.marketplaceCategory;
+        }
         
         console.log("[Naavi Dashboard] Routing to surgical Step Patch Agent:", `${API}/api/path/patch-step`, payload);
         const patchRes = await fetch(`${API}/api/path/patch-step`, {
@@ -543,12 +576,32 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
         }
         
         onPathGenerated(newPathData, userInput);
+        const sectionLabels = {
+          macro_free: "Macro Marketplace",
+          micro_structured: "Micro Marketplace",
+          nano_expert: "Nano Marketplace",
+        };
+        const categoryLabel = (patchResult.marketplace_category || surgicalInfo.marketplaceCategory || "marketplace")
+          .replace(/^./, character => character.toUpperCase());
+        const sectionLabel = sectionLabels[patchResult.marketplace_section || surgicalInfo.marketplaceSection];
+        setRefineResult({
+          type: "success",
+          title: `Step ${surgicalInfo.stepId} updated successfully`,
+          message: surgicalInfo.field === "marketplace"
+            ? `${sectionLabel} → ${categoryLabel} was updated. All other Marketplace categories, views, and pathway steps were preserved.`
+            : `Only the ${surgicalInfo.field.replaceAll("_", " ")} field was updated. All other pathway content was preserved.`,
+        });
         setRefinePrompt("");
         setLoading(false);
         return;
       } catch (err) {
         console.error("[Naavi Dashboard] Surgical Step Patch error:", err);
         setError(err.message || "Surgical step refinement failed. Please try again.");
+        setRefineResult({
+          type: "error",
+          title: "Refinement was not applied",
+          message: err.message || "The requested update failed. Please try again.",
+        });
         setLoading(false);
         return;
       }
@@ -642,7 +695,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   }
 
   return (
-    <div className="db-root">
+    <div className={`db-root ${pathData ? "has-path" : ""}`}>
 
       {/* ── LEFT PANEL ── */}
       <div className="db-left">
@@ -763,7 +816,10 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                 rows={3}
                 placeholder="Describe required changes..."
                 value={refinePrompt}
-                onChange={e => setRefinePrompt(e.target.value)}
+                onChange={e => {
+                  setRefinePrompt(e.target.value);
+                  if (refineResult) setRefineResult(null);
+                }}
                 disabled={loading}
               />
               {refinePrompt.trim() !== "" && (
@@ -789,8 +845,19 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
                 onClick={() => generate(refinePrompt, true)}
                 disabled={loading || !refineAnalysis.isValid}
               >
-                <IconNavigation size={14} /> Refine Pathway
+                <IconNavigation size={14} /> {loading ? "Applying update..." : "Refine Pathway"}
               </button>
+              {refineResult && (
+                <div className={`db-refine-result ${refineResult.type}`} role="status" aria-live="polite">
+                  <span className="db-refine-result-icon">
+                    {refineResult.type === "success" ? <IconCheck size={15} /> : "!"}
+                  </span>
+                  <div>
+                    <strong>{refineResult.title}</strong>
+                    <p>{refineResult.message}</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
