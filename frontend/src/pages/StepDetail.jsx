@@ -167,6 +167,31 @@ export default function StepDetail({ step, initialView = "macro", onViewClick })
           background: linear-gradient(135deg, #F0FBF7 0%, #FFF 100%);
         }
         .sd-market-cta-text { flex: 1; }
+
+        @media (max-width: 760px) {
+          .sd-market-cta {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 16px;
+          }
+
+          .sd-market-cta-text {
+            width: 100%;
+          }
+
+          .nano-options {
+            gap: 12px;
+          }
+
+          .nano-opt {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .nano-opt-icon {
+            justify-content: center;
+          }
+        }
       `}</style>
     </div>
   );

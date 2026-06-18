@@ -89,7 +89,7 @@ App.jsx
 cd Naaviverse/code
 pip install -r requirements.txt
 set ANTHROPIC_API_KEY=your_key_here    # Windows
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8001
 ```
 
 ### Step 2 — Frontend
