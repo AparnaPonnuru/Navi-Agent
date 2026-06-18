@@ -1124,6 +1124,64 @@
   }
 }
 
+@media (max-width: 660px) {
+  .db-left-scroll,
+  .db-route-header,
+  .db-path-view,
+  .db-path-intro-card,
+  .db-profile-card,
+  .db-step-card,
+  .db-alt-tabs,
+  .db-readiness-bar-row,
+  .db-profile-edit-field-row {
+    gap: 12px;
+  }
+
+  .db-input-card,
+  .db-profile-card,
+  .db-path-intro-card,
+  .db-step-card {
+    padding: 16px;
+  }
+
+  .db-route-header {
+    padding: 16px;
+  }
+
+  .db-route-header-right,
+  .db-path-actions,
+  .db-step-actions,
+  .db-profile-head-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .db-step-row {
+    flex-direction: column;
+  }
+
+  .db-step-card {
+    padding: 16px;
+  }
+
+  .db-profile-edit-field-row {
+    grid-template-columns: 1fr;
+  }
+
+  .db-profile-item,
+  .db-path-stat,
+  .db-route-stat {
+    justify-content: space-between;
+  }
+
+  .db-readiness-label,
+  .db-route-stat-val,
+  .db-step-title,
+  .db-path-title {
+    white-space: normal;
+  }
+}
+
 /* ════════════════════════════════════════════════════════════
    Loading Panel — Multi-Agent Pipeline
    ════════════════════════════════════════════════════════════ */

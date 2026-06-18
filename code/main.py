@@ -1292,8 +1292,11 @@ async def build_and_store_final_path(
 async def login(req: LoginRequest):
     admin_email = os.environ.get("ADMIN_USERNAME", "pathengine.admin@gmail.com")
     admin_password = os.environ.get("ADMIN_PASSWORD", "Pathadmin@123")
+    allowed_admin_emails = {admin_email.lower()}
+    if admin_email.lower() == "pathengine.admin@gmail.com":
+        allowed_admin_emails.add("admin@gmail.com")
     
-    if req.email.lower() == admin_email.lower() and req.password == admin_password:
+    if req.email.lower() in allowed_admin_emails and req.password == admin_password:
         admin_profile = await profiles_collection.find_one({"email": admin_email.lower()})
         if not admin_profile:
             admin_profile = {

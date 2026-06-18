@@ -1160,6 +1160,100 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@media (max-width: 980px) {
+  .ar-page {
+    padding: 18px 14px 60px;
+  }
+
+  .ar-filters-bar,
+  .editor-title-row,
+  .stats-card-header,
+  .marketplace-panel-head,
+  .ar-modal-btns,
+  .editor-submit-btns {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ar-filters-bar {
+    gap: 12px;
+  }
+
+  .ar-queue-grid,
+  .stats-read-grid,
+  .edit-row-2,
+  .edit-row-3,
+  .market-cards-grid,
+  .milestone-views-columns,
+  .ar-q-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .ar-q-top,
+  .ar-q-student,
+  .editor-title-actions,
+  .market-card-head,
+  .step-edit-actions,
+  .ar-alt-tabs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .market-card-head {
+    align-items: flex-start;
+  }
+
+  .market-row2,
+  .market-row3 {
+    flex-direction: column;
+  }
+
+  .step-edit-actions {
+    justify-content: flex-start;
+  }
+
+  .ar-alt-tabs {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 660px) {
+  .ar-page {
+    padding: 14px 12px 50px;
+  }
+
+  .ar-queue-card,
+  .market-card,
+  .editor-action-card,
+  .ar-modal-box {
+    padding: 16px;
+  }
+
+  .ar-q-route {
+    padding: 10px;
+  }
+
+  .market-card {
+    gap: 12px;
+  }
+
+  .market-card .mp-card-tags,
+  .market-card-head {
+    gap: 10px;
+  }
+
+  .btn-save-section,
+  .btn-secondary,
+  .approve-btn,
+  .btn-pdf,
+  .btn-pdf-pill,
+  .btn-add-step,
+  .btn-add-resource {
+    width: 100%;
+  }
+}
+
 /* ── Admin Alternatives Selector Tabs ─────────────────────── */
 .ar-alt-tabs-container {
   display: flex;
@@ -1225,4 +1319,4 @@
     &:nth-child(2) .tab-dot { background: var(--blue); }
     &:nth-child(3) .tab-dot { background: var(--red); }
   }
-}
+}

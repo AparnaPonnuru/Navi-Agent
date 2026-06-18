@@ -2,7 +2,7 @@ import { useState } from "react";
 
 // ── localStorage helpers ──────────────────────────────────
 const SESSION_KEY = "nv_session";
-const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8001" : "");
 
 function getLocalProfile(email) {
   try { return JSON.parse(localStorage.getItem(`nv_profile_${email}`) || "null"); }
@@ -120,12 +120,13 @@ export default function AuthFlow({ onAuthenticated }) {
             <input
               type="email"
               className={`auth-input ${emailError ? "auth-input--error" : ""}`}
-              placeholder="admin@gmail.com"
+              placeholder="pathengine.admin@gmail.com"
               value={email}
               onChange={e => { setEmail(e.target.value); setEmailError(""); }}
               onKeyDown={e => e.key === "Enter" && handleLogin()}
               autoFocus
             />
+            <span className="auth-field-note">Default admin login uses the email pathengine.admin@gmail.com.</span>
           </div>
 
           <div className="auth-field-group">

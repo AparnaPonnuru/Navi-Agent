@@ -752,6 +752,47 @@ export default function Marketplace({ step, view }) {
 
         .mp-empty { text-align: center; padding: 48px; }
         .mp-empty-icon { display: flex; justify-content: center; color: var(--text3); margin-bottom: 12px; }
+
+        @media (max-width: 760px) {
+          .mp-view-tabs,
+          .mp-cats,
+          .mp-card-bottom,
+          .mp-card-top,
+          .mp-card-price-line,
+          .mp-card-rating {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .mp-view-btn,
+          .mp-cat-btn,
+          .btn-primary.mp-connect-btn,
+          .mp-search-wrap {
+            width: 100%;
+          }
+
+          .mp-grid,
+          .mp-recommended-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .mp-card {
+            padding: 18px;
+          }
+
+          .mp-card-tag,
+          .mp-card-tags {
+            gap: 8px;
+          }
+
+          .mp-card-top {
+            align-items: flex-start;
+          }
+
+          .mp-search-wrap {
+            max-width: 100%;
+          }
+        }
       `}</style>
     </div>
   );

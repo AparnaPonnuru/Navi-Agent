@@ -4,7 +4,7 @@ import {
   IconArrowRight, IconBrain, IconNavigation, IconRoute, IconCheck,
 } from "./Icons";
 
-const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:8000" : "");
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8001" : "");
 
 const LOADING_MSGS = [
   "Analyzing your profile...",
@@ -480,7 +480,7 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
       setLoading(false);
       setRegeneratingIdx(null);
       setError(e.message.includes("fetch")
-        ? "Cannot connect to backend. Run: uvicorn main:app --reload --port 8000"
+        ? "Cannot connect to backend. Run: uvicorn main:app --reload --port 8001"
         : e.message);
     }
   }

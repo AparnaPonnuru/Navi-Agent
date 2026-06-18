@@ -937,3 +937,33 @@ body {
     padding: 20px 12px 56px;
   }
 }
+
+@media (max-width: 520px) {
+  .maps-topbar {
+    grid-template-columns: auto 1fr;
+    align-items: stretch;
+  }
+
+  .route-searchbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px 12px;
+  }
+
+  .route-search-copy {
+    width: 100%;
+  }
+
+  .route-search-copy strong,
+  .route-search-copy span {
+    white-space: normal;
+  }
+
+  .topbar-profile {
+    display: none;
+  }
+
+  .maps-shell .page {
+    padding: 16px 12px 48px;
+  }
+}

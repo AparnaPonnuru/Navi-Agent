@@ -352,3 +352,40 @@
     }
   }
 }
+
+@media (max-width: 760px) {
+  .profile-details-container {
+    padding: 20px 14px 50px;
+  }
+
+  .profile-hero-banner {
+    padding: 20px;
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .profile-hero-info {
+    width: 100%;
+  }
+
+  .profile-badge-row {
+    justify-content: center;
+  }
+
+  .profile-form-grid,
+  .profile-field-row-2col {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .profile-form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .profile-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

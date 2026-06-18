@@ -38,7 +38,7 @@ Ensure you configure the following **Secrets** in your Hugging Face Space settin
    ```
 4. Start the FastAPI server:
    ```bash
-   uvicorn main:app --reload --port 8000
+   uvicorn main:app --reload --port 8001
    ```
 
 ### 2. Frontend Setup
