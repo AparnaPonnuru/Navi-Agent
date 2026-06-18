@@ -145,6 +145,10 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
   "readiness_score": 15,
   "readiness_label": "High School Starter",
   "total_duration": "<calculated total duration, e.g. '36 months' or '24 months' or '12 months'>",
+  "blind_spots": [
+    "<warning or critical gap 1 based on profile constraints>",
+    "<warning or critical gap 2 based on profile constraints>"
+  ],
   "macro_path": [
     {{
       "id": 1,
@@ -225,6 +229,17 @@ Respond ONLY with valid JSON. No markdown, no backticks, no explanation.
 }}
 
 Rules:
+- Calculate a realistic "readiness_score" (0-100) and "readiness_label" (e.g. Early Starter, Advanced, Intermediate) based dynamically on the student's profile signals (academic performance, stream, and curriculum) relative to the competitiveness of the Target Career Goal:
+  - For highly competitive targets (e.g., Harvard, Yale, Stanford, MIT, Oxford, IIT, BITS, Imperial College):
+    - If performance is "90% and above", score should be around 30-40 (Early/Intermediate Starter).
+    - If performance is "75%–89%", score should be around 20-30.
+    - If performance is below 75%, score should be around 10-20.
+  - For moderately competitive targets (e.g., Local Universities, State Colleges):
+    - If performance is "90% and above", score should be around 75-85 (Advanced Starter).
+    - If performance is "75%–89%", score should be around 50-60.
+    - If performance is below 75%, score should be around 30-40.
+  - Adjust the score dynamically based on these parameters. Do NOT hardcode it.
+- Highlight at least 2 critical "blind_spots" (gaps, potential constraints, or warnings based on their profile, e.g. "Lacks research projects", "Needs IELTS prep") as a list of strings.
 - CRITICAL TIMELINE CONSTRAINT: You MUST calculate the total timeline duration strictly based on the student's current grade from the profile details:
   - If the student is in 10th grade (or profile grade contains "10"), set `total_duration` to EXACTLY "36 months" and distribute steps across Months 1-36.
   - If the student is in 11th grade (or profile grade contains "11"), set `total_duration` to EXACTLY "24 months" and distribute steps across Months 1-24.
@@ -703,6 +718,65 @@ def customize_steps_for_focus(steps_configs: list, focus: Optional[str], goal: s
         custom_configs.append(step_copy)
 
     return custom_configs
+
+def calculate_path_metrics(current: str, goal: str, profile: dict) -> dict:
+    # 1. total_duration based on student's current grade
+    grade_str = str(profile.get("grade") or "").lower() or current.lower()
+    if "10" in grade_str or "tenth" in grade_str:
+        total_duration = "36 months"
+    elif "11" in grade_str or "eleventh" in grade_str:
+        total_duration = "24 months"
+    elif "12" in grade_str or "twelfth" in grade_str:
+        total_duration = "12 months"
+    else:
+        # Default or university
+        total_duration = "12 months"
+
+    # 2. Competitiveness of target goal
+    goal_lower = goal.lower()
+    competitive_keywords = [
+        "harvard", "yale", "stanford", "mit", "oxford", "cambridge", "iit", "bits", "imperial college", "caltech", "berkeley", "princeton", "columbia", "cornell"
+    ]
+    is_highly_competitive = any(kw in goal_lower for kw in competitive_keywords)
+
+    # 3. Performance
+    perf_str = str(profile.get("performance") or "").lower()
+    
+    # Map performance text to a category: "high", "medium", "low"
+    if "90" in perf_str or "above 90" in perf_str or "excellent" in perf_str or "gpa 4" in perf_str or "a+" in perf_str:
+        perf_cat = "high"
+    elif "75" in perf_str or "80" in perf_str or "85" in perf_str or "good" in perf_str or "average" in perf_str:
+        perf_cat = "medium"
+    else:
+        perf_cat = "low"
+
+    # Calculate readiness_score and readiness_label
+    if is_highly_competitive:
+        if perf_cat == "high":
+            readiness_score = 35
+            readiness_label = "Intermediate Starter"
+        elif perf_cat == "medium":
+            readiness_score = 25
+            readiness_label = "Early Starter"
+        else:
+            readiness_score = 15
+            readiness_label = "Early Starter"
+    else:
+        if perf_cat == "high":
+            readiness_score = 80
+            readiness_label = "Advanced Starter"
+        elif perf_cat == "medium":
+            readiness_score = 55
+            readiness_label = "Intermediate Starter"
+        else:
+            readiness_score = 35
+            readiness_label = "Early Starter"
+
+    return {
+        "total_duration": total_duration,
+        "readiness_score": readiness_score,
+        "readiness_label": readiness_label
+    }
 
 # Pedagogical High-Fidelity Fallback Roadmap in case of a complete API lockout
 def get_fallback_mock_roadmap(current: str, goal: str, profile: dict, refine_prompt: Optional[str] = None, focus: Optional[str] = None) -> dict:
@@ -1241,36 +1315,36 @@ async def build_and_store_final_path(
     goal: str,
     profile: dict
 ) -> dict:
+    # Calculate metrics directly
+    metrics = calculate_path_metrics(current, goal, profile)
+    
     final_macro_path = []
     blueprint_milestones = blueprint.get("macro_path", [])
 
     for i, orig_milestone in enumerate(blueprint_milestones):
         m_id = orig_milestone.get("id", i + 1)
-        audited_step = next((m for m in steps_audit if m.get("id") == m_id), {})
-        audited_market = next((m.get("marketplace") for m in market_audit if m.get("id") == m_id), None)
-
         merged_milestone = {
             "id": m_id,
-            "title": audited_step.get("title") or orig_milestone.get("title", f"Milestone {m_id}"),
-            "duration": audited_step.get("duration") or orig_milestone.get("duration", "3 months"),
-            "description": audited_step.get("description") or orig_milestone.get("description", ""),
-            "learning_objectives": audited_step.get("learning_objectives") or orig_milestone.get("learning_objectives", []),
-            "macro_view": audited_step.get("macro_view") or orig_milestone.get("macro_view", ""),
-            "micro_view": audited_step.get("micro_view") or orig_milestone.get("micro_view", ""),
-            "nano_view": audited_step.get("nano_view") or orig_milestone.get("nano_view", ""),
-            "marketplace": audited_market or orig_milestone.get("marketplace") or {"macro_free": [], "micro_structured": [], "nano_expert": []},
-            "micro_steps": audited_step.get("micro_steps") or orig_milestone.get("micro_steps") or []
+            "title": orig_milestone.get("title", f"Milestone {m_id}"),
+            "duration": orig_milestone.get("duration", "3 months"),
+            "description": orig_milestone.get("description", ""),
+            "learning_objectives": orig_milestone.get("learning_objectives", []),
+            "macro_view": orig_milestone.get("macro_view", ""),
+            "micro_view": orig_milestone.get("micro_view", ""),
+            "nano_view": orig_milestone.get("nano_view", ""),
+            "marketplace": orig_milestone.get("marketplace") or {"macro_free": [], "micro_structured": [], "nano_expert": []},
+            "micro_steps": orig_milestone.get("micro_steps") or []
         }
         final_macro_path.append(merged_milestone)
 
     final_json = {
-        "path_title": path_audit.get("path_title") or blueprint.get("path_title") or f"Academic Pathway to {goal}",
-        "path_description": path_audit.get("path_description") or blueprint.get("path_description") or f"Detailed strategy blueprint for achieving target goal: {goal}.",
-        "readiness_score": path_audit.get("readiness_score") or blueprint.get("readiness_score", 15),
-        "readiness_label": path_audit.get("readiness_label") or blueprint.get("readiness_label", "Standard Grade"),
-        "total_duration": blueprint.get("total_duration", "12 months"),
+        "path_title": blueprint.get("path_title") or f"Academic Pathway to {goal}",
+        "path_description": blueprint.get("path_description") or f"Detailed strategy blueprint for achieving target goal: {goal}.",
+        "readiness_score": metrics["readiness_score"],
+        "readiness_label": metrics["readiness_label"],
+        "total_duration": metrics["total_duration"],
         "macro_path": final_macro_path,
-        "blind_spots": path_audit.get("blind_spots") or blueprint.get("blind_spots") or []
+        "blind_spots": blueprint.get("blind_spots") or []
     }
 
     name_tokens = build_name_patterns(profile, current)
@@ -1445,13 +1519,7 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "progress": 50,
                 "message": "Auditing and refining pathway options..."
             })
-
-            # 2. Run Audits in parallel for all options
-            audit_tasks = [
-                run_option_audits(bp, current, goal, profile, refine_prompt, existing_roadmap)
-                for bp in valid_blueprints
-            ]
-            audit_results = await asyncio.gather(*audit_tasks, return_exceptions=True)
+            await asyncio.sleep(0.1)
 
             completed.extend(["agent2", "agent3", "agent4"])
             yield sse_payload("status", {
@@ -1459,25 +1527,20 @@ async def generate_path_stream(req: PathGenerationRequest):
                 "progress": 90,
                 "message": "Preparing final recommendations..."
             })
+            await asyncio.sleep(0.1)
 
-            # 3. Merge outputs
+            # 3. Process outputs directly (directly calculate metrics within build_and_store_final_path)
             final_alternatives = []
             for i, bp in enumerate(valid_blueprints):
-                res = audit_results[i]
-                if isinstance(res, Exception):
-                    path_audit, steps_audit, market_audit = {}, [], []
-                else:
-                    path_audit, steps_audit, market_audit = res
-
                 final_json = await build_and_store_final_path(
-                    bp, path_audit, steps_audit, market_audit, current, goal, profile
+                    bp, {}, [], [], current, goal, profile
                 )
                 final_json["option_name"] = option_names[i]
                 final_alternatives.append(final_json)
 
             completed.append("ready")
             elapsed = time.perf_counter() - started_at
-            print(f"[Audit API] Alternate paths generation and audits completed in {elapsed:.2f} seconds.")
+            print(f"[Audit API] Alternate paths generation completed in {elapsed:.2f} seconds (Consolidated Agent 1 Pipeline).")
             yield sse_payload("status", {
                 "statuses": build_agent_statuses(None, completed),
                 "progress": 100,
@@ -1557,24 +1620,11 @@ async def generate_path(req: PathGenerationRequest):
             else:
                 valid_blueprints.append(bp)
                 
-        # 2. Run Audits in parallel
-        audit_tasks = [
-            run_option_audits(bp, current, goal, profile, refine_prompt, existing_roadmap)
-            for bp in valid_blueprints
-        ]
-        audit_results = await asyncio.gather(*audit_tasks, return_exceptions=True)
-        
         # 3. Merge
         final_alternatives = []
         for i, bp in enumerate(valid_blueprints):
-            res = audit_results[i]
-            if isinstance(res, Exception):
-                path_audit, steps_audit, market_audit = {}, [], []
-            else:
-                path_audit, steps_audit, market_audit = res
-                
             final_json = await build_and_store_final_path(
-                bp, path_audit, steps_audit, market_audit, current, goal, profile
+                bp, {}, [], [], current, goal, profile
             )
             final_json["option_name"] = option_names[i]
             final_alternatives.append(final_json)
@@ -1644,76 +1694,11 @@ async def generate_path_audit(req: PathAuditRequest):
     profile = req.profile or {}
     
     try:
-        # Trigger Agents 2, 3, and 4 in parallel using asyncio.gather
-        agent2_task = run_agent_2_path_auditor(blueprint, current, goal, profile)
-        agent3_task = run_agent_3_steps_auditor(blueprint, current, goal, profile)
-        agent4_task = run_agent_4_marketplace_auditor(blueprint, current, goal, profile)
-        
-        path_audit, steps_audit, market_audit = await asyncio.gather(
-            agent2_task, agent3_task, agent4_task,
-            return_exceptions=True
+        final_json = await build_and_store_final_path(
+            blueprint, {}, [], [], current, goal, profile
         )
-        
-        # Handle exceptions gracefully
-        if isinstance(path_audit, Exception): 
-            print(f"Agent 2 Error: {path_audit}")
-            path_audit = {}
-        if isinstance(steps_audit, Exception): 
-            print(f"Agent 3 Error: {steps_audit}")
-            steps_audit = []
-        if isinstance(market_audit, Exception): 
-            print(f"Agent 4 Error: {market_audit}")
-            market_audit = []
-        
-        # Merge parallel agent outputs
-        final_macro_path = []
-        blueprint_milestones = blueprint.get("macro_path", [])
-        
-        for i, orig_milestone in enumerate(blueprint_milestones):
-            m_id = orig_milestone.get("id", i + 1)
-            
-            # Fetch step details and views audited by Agent 3
-            audited_step = next((m for m in steps_audit if m.get("id") == m_id), {})
-            
-            # Fetch marketplace audited by Agent 4
-            audited_market = next((m.get("marketplace") for m in market_audit if m.get("id") == m_id), None)
-            
-            merged_milestone = {
-                "id": m_id,
-                "title": audited_step.get("title") or orig_milestone.get("title", f"Milestone {m_id}"),
-                "duration": audited_step.get("duration") or orig_milestone.get("duration", "3 months"),
-                "description": audited_step.get("description") or orig_milestone.get("description", ""),
-                "learning_objectives": audited_step.get("learning_objectives") or orig_milestone.get("learning_objectives", []),
-                "macro_view": audited_step.get("macro_view") or orig_milestone.get("macro_view", ""),
-                "micro_view": audited_step.get("micro_view") or orig_milestone.get("micro_view", ""),
-                "nano_view": audited_step.get("nano_view") or orig_milestone.get("nano_view", ""),
-                "marketplace": audited_market or orig_milestone.get("marketplace") or {"macro_free": [], "micro_structured": [], "nano_expert": []},
-                "micro_steps": audited_step.get("micro_steps") or orig_milestone.get("micro_steps") or []
-            }
-            final_macro_path.append(merged_milestone)
-        
-        final_json = {
-            "path_title": path_audit.get("path_title") or blueprint.get("path_title") or f"Academic Pathway to {goal}",
-            "path_description": path_audit.get("path_description") or blueprint.get("path_description") or f"Detailed strategy blueprint for achieving target goal: {goal}.",
-            "readiness_score": path_audit.get("readiness_score") or blueprint.get("readiness_score", 15),
-            "readiness_label": path_audit.get("readiness_label") or blueprint.get("readiness_label", "Standard Grade"),
-            "total_duration": blueprint.get("total_duration", "12 months"),
-            "macro_path": final_macro_path,
-            "blind_spots": path_audit.get("blind_spots") or blueprint.get("blind_spots") or []
-        }
-        
-        # Post-process — sanitize all personal names out of the final JSON
-        name_tokens = build_name_patterns(profile, current)
-        if name_tokens:
-            print(f"[Sanitizer] Scrubbing personal name tokens: {name_tokens}")
-            final_json = recursive_sanitize(final_json, name_tokens)
-            print("[Sanitizer] Personal name sanitization complete.")
-        
-        final_json["db_id"] = None
-        final_json["status"] = "draft"
-        
         elapsed = time.time() - start_time
-        print(f"[Audit API] Parallel audit completed in {elapsed:.2f} seconds.")
+        print(f"[Audit API] Consolidated audit completed in {elapsed:.2f} seconds.")
         return final_json
         
     except Exception as e:
@@ -1919,6 +1904,145 @@ async def save_path(req: SavePathRequest):
     return {
         "message": "Path saved successfully for admin review",
         "db_id": str(insert_result.inserted_id)
+    }
+
+
+# ─── STEP PATCH: Surgical single-field update ─────────────────────────────────
+class StepPatchRequest(BaseModel):
+    step_id: int
+    field: str          # "description" | "macro_view" | "micro_view" | "nano_view" | "marketplace" | "micro_steps"
+    instruction: str    # User's refinement instruction
+    current_step: dict  # The full current step object
+    current_position: str
+    target_goal: str
+    profile: Optional[dict] = None
+
+STEP_PATCH_PROMPT = """You are the Naaviverse Step Patch Agent.
+Your ONLY job is to rewrite ONE specific field inside ONE step of a career roadmap.
+
+Step being updated:
+- Step ID: {step_id}
+- Step Title: {step_title}
+- Step Duration: {step_duration}
+
+Field to update: "{field}"
+Current value of that field:
+{current_value}
+
+Student Context:
+- Current Position: {current_position}
+- Target Goal: {target_goal}
+- Profile: {profile}
+
+User Instruction: {instruction}
+
+Rules:
+- Rewrite ONLY the "{field}" field according to the user's instruction.
+- Keep the content relevant to the step's title and duration.
+- Keep the tone academic, strategic, and professional.
+- Do NOT mention the student's personal name or email.
+- Output ONLY a valid JSON object with a single key "{field}" containing the rewritten value.
+- No markdown, no backticks, no explanation. Just the JSON.
+
+Expected output formats based on the target field:
+- If the field is "macro_view", "micro_view", "nano_view", or "description", the output format must be:
+  {{"{field}": "<your rewritten detailed text paragraph>"}}
+
+- If the field is "marketplace", the output format must be a valid JSON object:
+  {{
+    "marketplace": {{
+      "macro_free": [
+        {{
+          "name": "<resource name>",
+          "type": "<Free course | YouTube | Docs | Community>",
+          "why": "<why it fits>",
+          "next_step": "<action item>",
+          "tags": ["<tag>", "<tag>"]
+        }}
+      ],
+      "micro_structured": [
+        {{
+          "name": "<course/book name>",
+          "type": "<Course | Certification | Book | Bootcamp>",
+          "cost": "<cost>",
+          "duration": "<duration>",
+          "value": "<value prop>",
+          "next_step": "<action item>",
+          "tags": ["<tag>", "<tag>"]
+        }}
+      ],
+      "nano_expert": [
+        {{
+          "name": "<mentor/coaching name>",
+          "type": "<Mentor | Coaching | Expert review>",
+          "price": "<price>",
+          "session_details": "<format>",
+          "expected_outcomes": "<expected outcomes>",
+          "tags": ["<tag>", "<tag>"]
+        }}
+      ]
+    }}
+  }}
+
+  CRITICAL marketplace subsection rules:
+  - "macro section" / "macro free" / "free resources" / "vendors" in macro → update the "macro_free" array
+  - "micro section" / "micro structured" / "paid courses" → update the "micro_structured" array
+  - "nano section" / "nano expert" / "mentors" / "coaching" → update the "nano_expert" array
+  - If the user targets only ONE subsection (e.g. "macro section vendors"), rewrite only that subsection's array with 3–5 fresh, relevant, real-world entries. Copy the other two subsections EXACTLY from the current value shown above — do NOT change them.
+  - Always return ALL three keys (macro_free, micro_structured, nano_expert) in the output object.
+  - Each subsection must have at least 3 high-quality, specific, real-world entries relevant to the step title and student goal.
+
+- If the field is "micro_steps", the output format must be a JSON array of checklist items:
+  {{
+    "micro_steps": [
+      {{"task": "<actionable task item>", "resource": "<resource to use>"}}
+    ]
+  }}
+  IMPORTANT: Generate at least 5–8 detailed, specific, actionable micro-steps. Preserve any existing items that are still relevant unless the user asks to replace them.
+"""
+
+@app.post("/api/path/patch-step")
+async def patch_step(req: StepPatchRequest):
+    allowed_fields = {"description", "macro_view", "micro_view", "nano_view", "marketplace", "micro_steps"}
+    if req.field not in allowed_fields:
+        raise HTTPException(status_code=400, detail=f"Field must be one of: {', '.join(allowed_fields)}")
+
+    current_val = req.current_step.get(req.field, "")
+    if isinstance(current_val, (dict, list)):
+        current_value_str = json.dumps(current_val, indent=2)
+    else:
+        current_value_str = str(current_val)
+
+    prompt = STEP_PATCH_PROMPT.format(
+        step_id=req.step_id,
+        step_title=req.current_step.get("title", f"Step {req.step_id}"),
+        step_duration=req.current_step.get("duration", ""),
+        field=req.field,
+        current_value=current_value_str,
+        current_position=req.current_position,
+        target_goal=req.target_goal,
+        profile=json.dumps(req.profile or {}),
+        instruction=req.instruction
+    )
+
+    print(f"[Patch Agent] Patching step {req.step_id} field '{req.field}' with instruction: {req.instruction}")
+    result = await query_groq_json(prompt, preferred_model="llama-3.1-8b-instant")
+
+    if not result or req.field not in result:
+        raise HTTPException(status_code=500, detail="Patch agent failed to return updated content. Please try again.")
+
+    # Sanitize any personal names
+    profile = req.profile or {}
+    name_tokens = build_name_patterns(profile, req.current_position)
+    new_value = result[req.field]
+    if name_tokens:
+        new_value = recursive_sanitize(new_value, name_tokens)
+
+    print(f"[Patch Agent] Successfully patched step {req.step_id} field '{req.field}'.")
+    return {
+        "step_id": req.step_id,
+        "field": req.field,
+        "updated_value": new_value
     }
 
 

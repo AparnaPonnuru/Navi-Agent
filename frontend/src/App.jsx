@@ -50,13 +50,14 @@ export default function App() {
     }
   });
 
+  const [selectedAltIdx, setSelectedAltIdx] = useState(0);
   const [userInput, setUserInput] = useState(() => {
     const sessionStr = sessionStorage.getItem("nv_session");
     if (!sessionStr) return { current: "", goal: "" };
     try {
       const email = JSON.parse(sessionStr);
       if (!email) return { current: "", goal: "" };
-      return JSON.parse(localStorage.getItem(`nv_user_input_${email.toLowerCase()}`) || '{"current": "", "goal": ""}');
+      return JSON.parse(localStorage.getItem(`nv_user_input_${email.toLowerCase()}`) || '{"current": "", "goal": ""}') || { current: "", goal: "" };
     } catch {
       return { current: "", goal: "" };
     }
@@ -73,14 +74,16 @@ export default function App() {
     try {
       const emailKey = email.toLowerCase();
       const savedPath = JSON.parse(localStorage.getItem(`nv_path_data_${emailKey}`) || "null");
-      const savedInput = JSON.parse(localStorage.getItem(`nv_user_input_${emailKey}`) || '{"current": "", "goal": ""}');
+      const savedInput = JSON.parse(localStorage.getItem(`nv_user_input_${emailKey}`) || '{"current": "", "goal": ""}') || { current: "", goal: "" };
       console.log("[Naavi App] Loaded cached data for user. Path:", savedPath, "Input:", savedInput);
       setPathData(savedPath);
       setUserInput(savedInput);
+      setSelectedAltIdx(0);
     } catch (err) {
       console.error("[Naavi App] Error parsing loaded cached data:", err);
       setPathData(null);
       setUserInput({ current: "", goal: "" });
+      setSelectedAltIdx(0);
     }
     navigate("/dashboard");
   }
@@ -98,6 +101,7 @@ export default function App() {
     setPathData(null);
     setUserInput({ current: "", goal: "" });
     setActiveStep(null);
+    setSelectedAltIdx(0);
     navigate("/dashboard");
   }
 
@@ -125,6 +129,7 @@ export default function App() {
     if (!isRegen) {
       console.log("[Naavi App] Clearing old path data (not a tab-isolated regeneration).");
       setPathData(null); // Clear old path while generating
+      setSelectedAltIdx(0);
       if (activeEmail) {
         localStorage.removeItem(`nv_path_data_${activeEmail.toLowerCase()}`);
       }
@@ -140,11 +145,19 @@ export default function App() {
   const handlePathGenerated = (data, input) => {
     console.log("[Naavi App] Path generated/updated. Data:", data, "Input:", input);
     setPathData(data);
-    setUserInput(input);
+    const checkedInput = input || { current: "", goal: "" };
+    setUserInput(checkedInput);
+    if (data?.alternatives) {
+      if (selectedAltIdx >= data.alternatives.length) {
+        setSelectedAltIdx(0);
+      }
+    } else {
+      setSelectedAltIdx(0);
+    }
     // stay on dashboard — path renders inline on right
     if (activeEmail) {
       localStorage.setItem(`nv_path_data_${activeEmail.toLowerCase()}`, JSON.stringify(data));
-      localStorage.setItem(`nv_user_input_${activeEmail.toLowerCase()}`, JSON.stringify(input));
+      localStorage.setItem(`nv_user_input_${activeEmail.toLowerCase()}`, JSON.stringify(checkedInput));
     }
   };
 
@@ -153,6 +166,7 @@ export default function App() {
     setProfile(newProfile);
     setPathData(null);
     setUserInput({ current: "", goal: "" });
+    setSelectedAltIdx(0);
     if (activeEmail) {
       localStorage.removeItem(`nv_path_data_${activeEmail.toLowerCase()}`);
       localStorage.removeItem(`nv_user_input_${activeEmail.toLowerCase()}`);
@@ -164,6 +178,36 @@ export default function App() {
     setActiveStep(step);
     setActiveView("macro"); // Reset back to macro when exploring a new step
     goTo("stepdetail");
+  };
+
+  const handleStepPatched = (stepId, field, newValue) => {
+    console.log("[Naavi App] Step patched — stepId:", stepId, "field:", field);
+    // Update the patched field inside pathData without touching other steps
+    setPathData(prev => {
+      if (!prev) return prev;
+      const updateSteps = (steps) =>
+        steps.map(s => s.id === stepId ? { ...s, [field]: newValue } : s);
+
+      let updated;
+      if (prev.alternatives) {
+        updated = {
+          ...prev,
+          alternatives: prev.alternatives.map(alt => ({
+            ...alt,
+            macro_path: updateSteps(alt.macro_path || [])
+          }))
+        };
+      } else {
+        updated = { ...prev, macro_path: updateSteps(prev.macro_path || []) };
+      }
+      // Persist to localStorage
+      if (activeEmail) {
+        localStorage.setItem(`nv_path_data_${activeEmail.toLowerCase()}`, JSON.stringify(updated));
+      }
+      return updated;
+    });
+    // Also update the activeStep so StepDetail reflects the new value immediately
+    setActiveStep(prev => prev?.id === stepId ? { ...prev, [field]: newValue } : prev);
   };
 
   const handleViewClick = (view) => {
@@ -265,20 +309,25 @@ export default function App() {
             <div className="route-search-point"><IconPin size={14} /></div>
             <div className="route-search-copy">
               <span>From</span>
-              <strong>{userInput.current || buildPositionLabel(profile)}</strong>
+              <strong>{userInput?.current || buildPositionLabel(profile)}</strong>
             </div>
             <div className="route-search-divider" />
             <div className="route-search-point goal"><IconTarget size={14} /></div>
             <div className="route-search-copy">
               <span>To</span>
-              <strong>{userInput.goal || "Set your future goal"}</strong>
+              <strong>{userInput?.goal || "Set your future goal"}</strong>
             </div>
             {pathData && (
               <>
                 <div className="route-search-divider" />
                 <div className="route-search-copy">
                   <span>Steps</span>
-                  <strong>{pathData.macro_path?.length || 0} steps</strong>
+                  <strong>
+                    {(pathData?.alternatives
+                      ? pathData.alternatives[selectedAltIdx] || pathData.alternatives[0]
+                      : pathData
+                    )?.macro_path?.length || 0} steps
+                  </strong>
                 </div>
               </>
             )}
@@ -304,6 +353,8 @@ export default function App() {
                 onStepClick={handleStepClick}
                 onGenerationStart={handleGenerationStart}
                 onProfileUpdated={handleProfileUpdated}
+                selectedAltIdx={selectedAltIdx}
+                setSelectedAltIdx={setSelectedAltIdx}
               />
             } />
             <Route path="/profile" element={
@@ -320,6 +371,9 @@ export default function App() {
                   initialView={activeView}
                   onViewClick={handleViewClick}
                   onBack={() => navigate("/dashboard")}
+                  userInput={userInput}
+                  profile={profile}
+                  onStepPatched={handleStepPatched}
                 />
               ) : (
                 <Navigate to="/dashboard" replace />

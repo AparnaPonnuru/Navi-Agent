@@ -1,3 +1,5 @@
+//dashboard.jsx::
+
 import { useState, useEffect } from "react";
 import './Dashboard.scss';
 import {
@@ -171,6 +173,92 @@ function analyzeRefinement(text) {
   };
 }
 
+function parseSurgicalRefinement(prompt, steps) {
+  if (!prompt || !steps || steps.length === 0) return null;
+  
+  const text = prompt.toLowerCase();
+  
+  // Look for step/milestone/phase and number
+  const stepMatch = text.match(/(?:step|milestone|phase)\s*(\d+)/i);
+  if (!stepMatch) return null;
+  
+  const stepId = parseInt(stepMatch[1], 10);
+  const targetStep = steps.find(s => s.id === stepId);
+  if (!targetStep) return null;
+  
+  let field = null;
+
+  // ── PRIORITY 1: Marketplace / vendor keywords (must come before "macro" check
+  //    because users often say "marketplace for the macro section" and the word
+  //    "macro" appears as context, NOT as the target field).
+  if (
+    text.includes("marketplace") ||
+    text.includes("vendor") ||
+    text.includes("vendors") ||
+    text.includes("market") ||
+    text.includes("resource") ||
+    text.includes("provider") ||
+    text.includes("platform") ||
+    text.includes("mentor") ||
+    text.includes("bootcamp") ||
+    text.includes("certification")
+  ) {
+    field = "marketplace";
+
+  // ── PRIORITY 2: micro_steps (before generic "micro" check)
+  } else if (
+    text.includes("micro_steps") || 
+    text.includes("micro steps") || 
+    text.includes("micro-steps") || 
+    text.includes("microstep") || 
+    text.includes("checklist") || 
+    text.includes("todo")
+  ) {
+    field = "micro_steps";
+
+  // ── PRIORITY 3: micro_view (generic micro, but NOT marketplace context)
+  } else if (
+    text.includes("micro_view") || 
+    text.includes("micro view") || 
+    text.includes("micro-view") || 
+    text.includes("microview") || 
+    text.includes("micro")
+  ) {
+    field = "micro_view";
+
+  // ── PRIORITY 4: macro_view — only when "macro" is clearly the target
+  } else if (
+    text.includes("macro_view") ||
+    text.includes("macro view") ||
+    text.includes("macro-view") ||
+    text.includes("macro")
+  ) {
+    field = "macro_view";
+
+  } else if (text.includes("nano")) {
+    field = "nano_view";
+
+  } else if (text.includes("description") || text.includes("desc")) {
+    field = "description";
+
+  // ── PRIORITY 5: remaining marketplace synonyms (course, link)
+  } else if (
+    text.includes("course") || 
+    text.includes("link")
+  ) {
+    field = "marketplace";
+  }
+  
+  if (!field) return null;
+  
+  return {
+    stepId,
+    field,
+    targetStep,
+    instruction: prompt
+  };
+}
+
 function RotateCwIcon({ size = 14 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -180,7 +268,7 @@ function RotateCwIcon({ size = 14 }) {
   );
 }
 
-export default function Dashboard({ profile, pathData, userInput, initialCurrent = "", onPathGenerated, onStepClick, onGenerationStart, onProfileUpdated }) {
+export default function Dashboard({ profile, pathData, userInput, initialCurrent = "", onPathGenerated, onStepClick, onGenerationStart, onProfileUpdated, selectedAltIdx, setSelectedAltIdx }) {
   const [current, setCurrent] = useState(userInput?.current || initialCurrent);
   const [goal, setGoal] = useState(userInput?.goal || "");
   const [loading, setLoading] = useState(false);
@@ -189,7 +277,6 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
   const [activeStep, setActiveStep] = useState(null);
   const [refinePrompt, setRefinePrompt] = useState("");
   const [savingPath, setSavingPath] = useState(false);
-  const [selectedAltIdx, setSelectedAltIdx] = useState(0);
   const [regeneratingIdx, setRegeneratingIdx] = useState(null);
 
   const activePath = pathData?.alternatives ? pathData.alternatives[selectedAltIdx] : pathData;
@@ -398,6 +485,75 @@ export default function Dashboard({ profile, pathData, userInput, initialCurrent
       refinePrompt: promptText || "(none)"
     });
     
+    // SMART ROUTING: Check if prompt is targeting a specific step
+    const surgicalInfo = parseSurgicalRefinement(promptText, steps);
+    if (surgicalInfo) {
+      console.log("[Naavi Dashboard] Smart Router: Detected surgical step update request:", surgicalInfo);
+      setLoading(true);
+      setError("");
+      setLoadMsg(`Updating Step ${surgicalInfo.stepId} ${surgicalInfo.field} with AI...`);
+      
+      try {
+        const payload = {
+          step_id: surgicalInfo.stepId,
+          field: surgicalInfo.field,
+          instruction: surgicalInfo.instruction,
+          current_step: surgicalInfo.targetStep,
+          current_position: current,
+          target_goal: goal,
+          profile: profile || {}
+        };
+        
+        console.log("[Naavi Dashboard] Routing to surgical Step Patch Agent:", `${API}/api/path/patch-step`, payload);
+        const patchRes = await fetch(`${API}/api/path/patch-step`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!patchRes.ok) {
+          const errData = await patchRes.json().catch(() => ({}));
+          throw new Error(errData.detail || "Step patch refinement failed");
+        }
+        
+        const patchResult = await patchRes.json();
+        console.log("[Naavi Dashboard] Surgical Step Patch success:", patchResult);
+        
+        // Merge the surgically updated step back into local macro_path
+        const updatedSteps = steps.map(s => 
+          s.id === surgicalInfo.stepId ? { ...s, [surgicalInfo.field]: patchResult.updated_value } : s
+        );
+        
+        let newPathData;
+        if (pathData?.alternatives) {
+          const newAlternatives = [...pathData.alternatives];
+          newAlternatives[selectedAltIdx] = {
+            ...activePath,
+            macro_path: updatedSteps
+          };
+          newPathData = {
+            ...pathData,
+            alternatives: newAlternatives
+          };
+        } else {
+          newPathData = {
+            ...pathData,
+            macro_path: updatedSteps
+          };
+        }
+        
+        onPathGenerated(newPathData, userInput);
+        setRefinePrompt("");
+        setLoading(false);
+        return;
+      } catch (err) {
+        console.error("[Naavi Dashboard] Surgical Step Patch error:", err);
+        setError(err.message || "Surgical step refinement failed. Please try again.");
+        setLoading(false);
+        return;
+      }
+    }
+
     if (onGenerationStart) {
       onGenerationStart({ current, goal }, isRegen);
     }
