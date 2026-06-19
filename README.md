@@ -40,18 +40,21 @@ Ensure you configure the following **Secrets** in your Hugging Face Space settin
    ```bash
    uvicorn main:app --reload --port 8001
    ```
+   Keep this on port `8001` unless you also update the frontend `VITE_API_URL`.
 
 ### 2. Frontend Setup
 1. Navigate to the `frontend/` directory.
-2. Install dependencies:
+2. Optional: copy `.env.example` to `.env.local` if you want to override the API URL.
+3. Install dependencies:
    ```bash
    npm install
    ```
-3. Start the Vite development server:
+4. Start the Vite development server:
    ```bash
    npm run dev
    ```
-4. Build the production package:
+   Open the app at `http://localhost:5173/dashboard`. The frontend runs on `5173`, but it calls the FastAPI backend at `http://127.0.0.1:8001`.
+5. Build the production package:
    ```bash
    npm run build
    ```
