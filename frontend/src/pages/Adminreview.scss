@@ -823,6 +823,10 @@
   &.nano  { border-top: 3px solid var(--red); }
 }
 
+.marketplace-panel--mobile {
+  display: none;
+}
+
 .marketplace-panel-head {
   display: flex;
   align-items: center;
@@ -1216,6 +1220,16 @@
     gap: 8px;
     flex-wrap: wrap;
   }
+
+  .marketplace-panel--desktop {
+    display: none;
+  }
+
+  .marketplace-panel--mobile {
+    display: block;
+    margin-top: 2px;
+    padding: 14px;
+  }
 }
 
 @media (max-width: 660px) {
@@ -1269,6 +1283,44 @@
   .btn-add-step,
   .btn-add-resource {
     width: 100%;
+  }
+
+  .ar-editor-milestone-card {
+    padding: 16px 12px;
+  }
+
+  .m-header {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .m-title-view {
+    display: contents;
+  }
+
+  .m-title-row-view {
+    grid-column: 2;
+    align-self: center;
+    margin-bottom: 0;
+  }
+
+  .m-desc-text {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .m-header-actions {
+    grid-column: 1 / -1;
+  }
+
+  .milestone-views-columns {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .view-column {
+    padding: 12px;
   }
 }
 

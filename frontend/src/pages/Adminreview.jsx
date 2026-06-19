@@ -934,6 +934,31 @@ export default function AdminReview() {
                             <span>{isExp ? "Hide" : `Resources (${count})`}</span>
                             <ChevronDown size={12} />
                           </button>
+                          {isExp && (
+                            <div className={`marketplace-panel marketplace-panel--mobile ${col.colorClass}`}>
+                              <div className="marketplace-panel-head">
+                                <span className={`market-panel-title ${col.colorClass}`}>{col.marketLabel}</span>
+                                {!isReadOnly && (
+                                  <button className={`btn-add-resource ${col.colorClass}`} onClick={() => addMarketItem(mIdx, col.marketKey)}>
+                                    <PlusIcon size={12} /> Add Resource
+                                  </button>
+                                )}
+                              </div>
+                              <div className="market-cards-grid">
+                                {(activeMilestone.marketplace?.[col.marketKey] || []).map((res, rIdx) => renderMarketCard(col, res, rIdx, mIdx))}
+                                {count === 0 && (
+                                  <div className="no-resources-msg">No resources yet. Click "+ Add Resource" to create one.</div>
+                                )}
+                              </div>
+                              {!isReadOnly && count > 0 && (
+                                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+                                  <button className="btn-save-section" onClick={() => saveMarketItemDirect(mIdx)} disabled={loadingSubmit}>
+                                    {loadingSubmit ? "Saving..." : "Save Marketplace Changes"}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -945,7 +970,7 @@ export default function AdminReview() {
                     if (!isExp) return null;
                     const items = activeMilestone.marketplace?.[col.marketKey] || [];
                     return (
-                      <div key={col.key} className={`marketplace-panel ${col.colorClass}`}>
+                      <div key={col.key} className={`marketplace-panel marketplace-panel--desktop ${col.colorClass}`}>
                         <div className="marketplace-panel-head">
                           <span className={`market-panel-title ${col.colorClass}`}>{col.marketLabel}</span>
                           {!isReadOnly && (
